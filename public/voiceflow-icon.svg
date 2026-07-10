@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="VoiceFlow Dev waveform mark">
+  <defs>
+    <linearGradient id="g" x1="18" y1="18" x2="110" y2="110" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#9CFFCB"/>
+      <stop offset="1" stop-color="#69A7FF"/>
+    </linearGradient>
+  </defs>
+  <rect width="128" height="128" rx="30" fill="#11151B"/>
+  <path d="M24 69h10l7-20 11 40 12-55 12 55 11-40 7 20h10" fill="none" stroke="url(#g)" stroke-width="9" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
