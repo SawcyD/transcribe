@@ -16,7 +16,7 @@ use tokio::sync::mpsc;
 
 use crate::{errors::AppError, models::AudioLevelPayload};
 
-use super::audio_level::{bar_values, decibels, peak, rms, LevelSmoother};
+use super::audio_level::{decibels, peak, rms, spectral_bars, BandSmoother, LevelSmoother};
 
 #[derive(Debug, Clone, Copy)]
 pub struct AudioFormat {
@@ -127,24 +127,35 @@ impl CaptureSession {
             .map_err(|error| AppError::Microphone(error.to_string()))?;
 
         let visualizer_stop = Arc::clone(&stop);
+        let visualizer_samples = Arc::clone(&samples);
+        let visualizer_sample_rate = format.sample_rate;
         let visualizer = thread::Builder::new()
             .name("voiceflow-audio-level".into())
             .spawn(move || {
                 let mut smoother = LevelSmoother::new(noise_floor_db);
-                let mut frame = 0u64;
+                let mut band_smoother = BandSmoother::new(12);
                 while !visualizer_stop.load(Ordering::Relaxed) {
                     let raw_rms = f32::from_bits(latest_rms.load(Ordering::Relaxed));
                     let raw_peak = f32::from_bits(latest_peak.load(Ordering::Relaxed));
                     let level = smoother.update(raw_rms);
+                    let recent_samples = visualizer_samples
+                        .lock()
+                        .ok()
+                        .map(|samples| {
+                            let start = samples.len().saturating_sub(512);
+                            samples[start..].to_vec()
+                        })
+                        .unwrap_or_default();
+                    let spectrum =
+                        spectral_bars(&recent_samples, visualizer_sample_rate, 12, level);
                     let payload = AudioLevelPayload {
                         session_id: session_id.clone(),
                         rms: raw_rms,
                         peak: raw_peak,
                         decibels: decibels(raw_rms),
-                        bars: bar_values(level, 12, frame),
+                        bars: band_smoother.update(&spectrum),
                     };
                     let _ = app.emit("audio-level", payload);
-                    frame = frame.wrapping_add(1);
                     thread::sleep(Duration::from_millis(33));
                 }
             })

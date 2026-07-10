@@ -63,20 +63,79 @@ impl LevelSmoother {
     }
 }
 
-pub fn bar_values(level: f32, count: usize, frame: u64) -> Vec<f32> {
-    let center = (count.saturating_sub(1)) as f32 / 2.0;
+/// Estimates energy in evenly spaced voice-frequency bands for the overlay.
+/// This intentionally stays lightweight: it samples the most recent window and
+/// runs on the visualizer thread, never on the realtime microphone callback.
+pub fn spectral_bars(samples: &[i16], sample_rate: u32, count: usize, level: f32) -> Vec<f32> {
+    if count == 0 {
+        return Vec::new();
+    }
+    if samples.len() < 32 || sample_rate == 0 {
+        return vec![level.clamp(0.03, 1.0); count];
+    }
+
+    let window = samples.len().min(512);
+    let samples = &samples[samples.len() - window..];
+    let min_frequency = 110.0f32;
+    let max_frequency = (sample_rate as f32 * 0.45).min(7_000.0).max(min_frequency);
+    let ratio = if count > 1 {
+        (max_frequency / min_frequency).powf(1.0 / (count - 1) as f32)
+    } else {
+        1.0
+    };
+
     (0..count)
         .map(|index| {
-            let distance = if center == 0.0 {
-                0.0
-            } else {
-                (index as f32 - center).abs() / center
-            };
-            let envelope = 1.0 - distance * 0.38;
-            let phase = (frame as f32 * 0.11 + index as f32 * 1.73).sin() * 0.07;
-            (level * (envelope + phase)).clamp(0.03, 1.0)
+            let frequency = min_frequency * ratio.powi(index as i32);
+            let phase_step = 2.0 * std::f32::consts::PI * frequency / sample_rate as f32;
+            let mut real = 0.0f32;
+            let mut imaginary = 0.0f32;
+            for (sample_index, sample) in samples.iter().enumerate() {
+                let normalized = *sample as f32 / i16::MAX as f32;
+                let window_position =
+                    sample_index as f32 / (window.saturating_sub(1).max(1)) as f32;
+                let window_weight =
+                    0.5 - 0.5 * (2.0 * std::f32::consts::PI * window_position).cos();
+                let phase = phase_step * sample_index as f32;
+                real += normalized * window_weight * phase.cos();
+                imaginary -= normalized * window_weight * phase.sin();
+            }
+            let magnitude = (real * real + imaginary * imaginary).sqrt() * 2.0 / window as f32;
+            (magnitude * 9.0 + level * 0.18).clamp(0.03, 1.0)
         })
         .collect()
+}
+
+#[derive(Debug, Clone)]
+pub struct BandSmoother {
+    current: Vec<f32>,
+    attack: f32,
+    release: f32,
+}
+
+impl BandSmoother {
+    pub fn new(count: usize) -> Self {
+        Self {
+            current: vec![0.03; count],
+            attack: 0.42,
+            release: 0.18,
+        }
+    }
+
+    pub fn update(&mut self, target: &[f32]) -> Vec<f32> {
+        if self.current.len() != target.len() {
+            self.current = vec![0.03; target.len()];
+        }
+        for (current, next) in self.current.iter_mut().zip(target.iter().copied()) {
+            let coefficient = if next > *current {
+                self.attack
+            } else {
+                self.release
+            };
+            *current += (next - *current) * coefficient;
+        }
+        self.current.clone()
+    }
 }
 
 #[cfg(test)]
@@ -104,8 +163,19 @@ mod tests {
     }
 
     #[test]
-    fn center_bars_have_a_larger_envelope() {
-        let bars = bar_values(0.8, 12, 0);
-        assert!(bars[5] > bars[0]);
+    fn spectral_bars_keep_a_stable_count() {
+        let bars = spectral_bars(&[0; 512], 48_000, 12, 0.2);
+        assert_eq!(bars.len(), 12);
+        assert!(bars.iter().all(|value| *value >= 0.03));
+    }
+
+    #[test]
+    fn band_smoother_attacks_and_releases() {
+        let mut smoother = BandSmoother::new(1);
+        let rising = smoother.update(&[1.0])[0];
+        let falling = smoother.update(&[0.03])[0];
+        assert!(rising > 0.03);
+        assert!(falling > 0.03);
+        assert!(falling < rising);
     }
 }

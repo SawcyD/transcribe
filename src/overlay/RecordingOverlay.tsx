@@ -8,7 +8,6 @@ export function RecordingOverlay() {
   const { dictation, audio, lastTranscript } = useAppStore();
   const presentation = overlayPresentation(dictation.state);
   const processing = presentation.tone === "processing";
-  const listening = presentation.tone === "listening";
   const handsFree = presentation.showFinish;
 
   return (
@@ -22,7 +21,6 @@ export function RecordingOverlay() {
         <div className="pill-message"><span>Paste failed</span></div>
       ) : (
         <div className="pill-center">
-          {listening && <span className="pill-live-dot" aria-hidden="true" />}
           <AudioVisualizer bars={audio?.bars ?? []} processing={processing} />
           {processing && <span className="pill-state-label">{presentation.label}</span>}
         </div>

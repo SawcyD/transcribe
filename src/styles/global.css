@@ -238,14 +238,16 @@ kbd { display: inline-flex; align-items: center; justify-content: center; min-wi
 .pill-action--finish { color: var(--mint); background: rgba(141,241,189,.1); box-shadow: inset 0 0 0 1px rgba(141,241,189,.12); }
 .pill-spacer { width: 28px; }
 .pill-center { position: relative; z-index: 1; display: flex; align-items: center; justify-content: center; min-width: 0; gap: 5px; }
-.pill-live-dot { width: 4px; height: 4px; border-radius: 50%; background: var(--mint); box-shadow: 0 0 0 3px rgba(141,241,189,.1), 0 0 9px rgba(141,241,189,.55); animation: live-pulse 1.4s ease-in-out infinite; }
-@keyframes live-pulse { 50% { opacity: .45; transform: scale(.78); } }
 .pill-state-label { color: #9ca9b7; font-family: "Cascadia Mono", Consolas, monospace; font-size: 7px; letter-spacing: .1em; text-transform: uppercase; }
 .pill-end-cap { position: relative; z-index: 1; justify-self: center; width: 5px; height: 5px; border-radius: 50%; background: #657281; box-shadow: 0 0 0 3px rgba(101,114,129,.08); }
-.audio-bars { display: flex; align-items: center; justify-content: center; gap: 1.5px; height: 24px; }
-.audio-bars i { width: 2px; max-height: 18px; min-height: 2px; border-radius: 2px; background: #9df2c5; opacity: .86; transition-property: height, opacity; transition-duration: 70ms; transition-timing-function: ease-out; }
-.audio-bars--processing i { height: 8px !important; animation: bar-process 900ms ease-in-out infinite alternate; }
-@keyframes bar-process { 50% { height: 15px !important; opacity: .45; } }
+.audio-wave { position: relative; display: grid; flex: 0 0 64px; grid-template-columns: repeat(18, minmax(0, 1fr)); align-items: center; width: 64px; height: 24px; contain: layout paint; }
+.audio-wave-line { position: absolute; z-index: 0; top: 50%; left: 0; width: 100%; height: 1px; border-radius: 999px; background: rgba(141,241,189,.18); box-shadow: 0 0 8px rgba(141,241,189,.16); transform: translateY(-50%); transition-property: background-color, box-shadow; transition-duration: 180ms; }
+.audio-wave::after { position: absolute; z-index: 0; top: 50%; left: 50%; width: 28px; height: 13px; content: ""; border-radius: 50%; background: rgba(141,241,189,.08); filter: blur(7px); opacity: .8; transform: translate(-50%, -50%); transition-property: background-color, opacity; transition-duration: 180ms; }
+.audio-wave-bar { position: relative; z-index: 1; justify-self: center; width: 2px; height: 18px; border-radius: 999px; background: linear-gradient(180deg, #d8ffe8 0%, var(--mint) 55%, #68d6a5 100%); box-shadow: 0 0 6px rgba(141,241,189,.42); opacity: .24; transform: scaleY(var(--wave-scale)); transform-origin: center; transition-property: transform, opacity, background-color, box-shadow; transition-duration: 140ms; transition-timing-function: cubic-bezier(.2, 0, 0, 1); will-change: transform, opacity; }
+.audio-wave--processing .audio-wave-line { background: rgba(118,170,250,.22); box-shadow: 0 0 9px rgba(118,170,250,.18); }
+.audio-wave--processing::after { background: rgba(118,170,250,.1); }
+.audio-wave--processing .audio-wave-bar { background: linear-gradient(180deg, #d9e7ff 0%, var(--blue) 55%, #5e8fd8 100%); box-shadow: 0 0 6px rgba(118,170,250,.42); animation: wave-process-pulse 900ms ease-in-out infinite alternate; }
+@keyframes wave-process-pulse { from { opacity: .38; } to { opacity: .72; } }
 .pill-message { position: relative; z-index: 1; display: flex; align-items: center; justify-content: center; gap: 6px; color: var(--mint); font-size: 9px; font-weight: 650; }
 .recording-pill--error .pill-message { color: var(--danger); }
 .pill-spinner { justify-self: center; width: 13px; height: 13px; border: 2px solid rgba(255,255,255,.14); border-top-color: var(--blue); border-radius: 50%; animation: spin 700ms linear infinite; }
