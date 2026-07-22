@@ -573,6 +573,10 @@ kbd { display: inline-flex; align-items: center; justify-content: center; min-wi
 textarea:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
 
 .diagnostic-report { max-height: 320px; overflow: auto; padding: 12px; color: var(--ink); background: var(--control-fill); border-radius: var(--corner-control); font-family: "Cascadia Mono", Consolas, monospace; font-size: 11px; line-height: 1.6; white-space: pre-wrap; }
+.tabular-value { font-variant-numeric: tabular-nums; }
+.update-dialog { display: grid; gap: 12px; }
+.update-dialog > p { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.55; text-wrap: pretty; }
+.update-dialog__notes { max-height: 180px; margin: 0; overflow: auto; padding: 10px 12px; color: var(--ink); background: var(--control-fill); border-radius: var(--corner-control); font: 11px/1.55 var(--memora-font); white-space: pre-wrap; }
 
 html:has(.overlay-surface), html:has(.overlay-surface) body, html:has(.overlay-surface) #root { min-width: 0; min-height: 0; height: 100%; background: transparent; }
 body:has(.overlay-surface) { overflow: hidden; }

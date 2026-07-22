@@ -13,6 +13,7 @@
     "autostart:default",
     "notification:default",
     "opener:allow-reveal-item-in-dir",
+    "process:default",
     "updater:default"
   ]
 }

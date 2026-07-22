@@ -1,4 +1,6 @@
 import { disable, enable, isEnabled } from "@tauri-apps/plugin-autostart";
+import { relaunch } from "@tauri-apps/plugin-process";
+import { check, type Update } from "@tauri-apps/plugin-updater";
 import { useEffect, useMemo, useState } from "react";
 import { ComboBox } from "@memora/ui";
 import { Button } from "../components/common/Button";
@@ -9,6 +11,14 @@ import { ToggleSwitch } from "../components/fluent/ToggleSwitch";
 import { defaultSettings, isTauri, native } from "../lib/native";
 import type { AppSettings, CleanupStyle, CredentialStatus, OverlayPosition } from "../types/models";
 import { validateSettings } from "./settingsValidation";
+
+type UpdateStatus =
+  | { kind: "idle" }
+  | { kind: "checking" }
+  | { kind: "current" }
+  | { kind: "available"; update: Update }
+  | { kind: "installing"; version: string }
+  | { kind: "error"; message: string };
 
 export function SettingsPage() {
   const [settings, setSettings] = useState<AppSettings>(defaultSettings);
@@ -21,6 +31,7 @@ export function SettingsPage() {
   const [report, setReport] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
+  const [updateStatus, setUpdateStatus] = useState<UpdateStatus>({ kind: "idle" });
 
   const errors = useMemo(() => validateSettings(settings), [settings]);
   const valid = Object.keys(errors).length === 0;
@@ -54,6 +65,27 @@ export function SettingsPage() {
     setSecret("");
     setCredentialDialog(null);
     setCredentials(await native.credentialStatus());
+  };
+
+  const checkForUpdates = async () => {
+    if (!isTauri()) return;
+    setUpdateStatus({ kind: "checking" });
+    try {
+      const update = await check();
+      setUpdateStatus(update ? { kind: "available", update } : { kind: "current" });
+    } catch (error) {
+      setUpdateStatus({ kind: "error", message: error instanceof Error ? error.message : String(error) });
+    }
+  };
+
+  const installUpdate = async (update: Update) => {
+    setUpdateStatus({ kind: "installing", version: update.version });
+    try {
+      await update.downloadAndInstall();
+      await relaunch();
+    } catch (error) {
+      setUpdateStatus({ kind: "error", message: error instanceof Error ? error.message : String(error) });
+    }
   };
 
   return (
@@ -105,6 +137,32 @@ export function SettingsPage() {
             />
           }
         />
+      </SettingsSection>
+
+      <SettingsSection title="Updates" description="Updates are downloaded only when you choose Install, then verified with VoiceFlow’s signing key.">
+        <SettingsRow
+          label="VoiceFlow updates"
+          description={
+            updateStatus.kind === "current"
+              ? "You are running the latest available version."
+              : updateStatus.kind === "available"
+                ? `Version ${updateStatus.update.version} is ready to install.`
+                : "Check GitHub Releases for a signed update."
+          }
+          action={
+            <Button
+              variant="secondary"
+              disabled={!isTauri() || updateStatus.kind === "checking" || updateStatus.kind === "installing"}
+              onClick={() => void checkForUpdates()}
+            >
+              {updateStatus.kind === "checking" ? "Checking…" : "Check for updates"}
+            </Button>
+          }
+        />
+        {updateStatus.kind === "installing" && (
+          <InfoBar severity="informational" title={`Installing VoiceFlow ${updateStatus.version}`} message="Downloading the signed update. VoiceFlow will restart when it is ready." />
+        )}
+        {updateStatus.kind === "error" && <InfoBar severity="error" title="Could not check for updates" message={updateStatus.message} />}
       </SettingsSection>
 
       <SettingsSection title="Overlay">
@@ -374,6 +432,24 @@ export function SettingsPage() {
           {saved ? "Saved" : "Save changes"}
         </Button>
       </div>
+
+      <ContentDialog
+        open={updateStatus.kind === "available"}
+        title={updateStatus.kind === "available" ? `VoiceFlow ${updateStatus.update.version} is ready` : "VoiceFlow update"}
+        primaryText="Install and restart"
+        onPrimary={() => {
+          if (updateStatus.kind === "available") void installUpdate(updateStatus.update);
+        }}
+        closeText="Not now"
+        onClose={() => setUpdateStatus({ kind: "idle" })}
+      >
+        {updateStatus.kind === "available" && (
+          <div className="update-dialog">
+            <p>VoiceFlow found a signed update. It will download in the background, install, and then restart the app.</p>
+            {updateStatus.update.body && <pre className="update-dialog__notes">{updateStatus.update.body}</pre>}
+          </div>
+        )}
+      </ContentDialog>
 
       <ContentDialog
         open={credentialDialog !== null}
