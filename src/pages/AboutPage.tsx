@@ -4,7 +4,7 @@ import { SettingsRow, SettingsSection } from "../components/fluent/SettingsRow";
 import { isTauri } from "../lib/native";
 
 export function AboutPage() {
-  const [version, setVersion] = useState("0.1.1");
+  const [version, setVersion] = useState("1.1.2");
 
   useEffect(() => {
     if (!isTauri()) return;

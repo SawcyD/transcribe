@@ -1,6 +1,6 @@
 [package]
 name = "voiceflow-dev"
-version = "0.1.1"
+version = "1.1.2"
 description = "Local-first Windows voice dictation for developers"
 authors = ["VoiceFlow Dev contributors"]
 license = "MIT"
