@@ -13,7 +13,7 @@ export const DICTATION_STATES = [
 ] as const;
 
 export type DictationState = (typeof DICTATION_STATES)[number];
-export type DictationMode = "push_to_talk" | "hands_free" | "command";
+export type DictationMode = "push_to_talk" | "hands_free" | "call" | "command";
 export type InsertionStatus = "inserted" | "copied" | "failed" | "cancelled";
 export type PostPasteAction = "none" | "enter" | "tab" | "newline";
 
@@ -38,6 +38,23 @@ export interface AudioLevelPayload {
   peak: number;
   decibels: number;
   bars: number[];
+}
+
+export interface ScreenContext {
+  application: string | null;
+  processName: string | null;
+  windowTitle: string | null;
+  cursorX: number;
+  cursorY: number;
+  monitor: {
+    left: number;
+    top: number;
+    width: number;
+    height: number;
+  };
+  screenshotDataUrl: string;
+  screenshotWidth: number;
+  screenshotHeight: number;
 }
 
 export interface TranscriptRecord {
@@ -100,12 +117,80 @@ export interface AppSettings {
   saveAudio: boolean;
   sessionLimitMinutes: number;
   noiseFloorDb: number;
+  callModeApplication: string;
+  callModeOutputDeviceName: string | null;
+  theme: "system" | "light" | "dark";
+  buddyStrollEnabled: boolean;
+  buddySpeakResponses: boolean;
+  assistantEndpoint: string;
+  assistantModel: string;
+  shortcuts: ShortcutBindings;
+  defaultMode: DictationMode;
+  autoDetectDeveloperApps: boolean;
+  appCleanupStyles: AppCleanupStyle[];
+  removeFillerWords: boolean;
+  removeFalseStarts: boolean;
+  backtrackingEnabled: boolean;
+  spokenFormattingEnabled: boolean;
+  voiceActionsEnabled: boolean;
+  showOverlay: boolean;
+  showWaveform: boolean;
+  playTones: boolean;
+  overlayPosition: OverlayPosition;
+  overlayOpacity: number;
+  buddyEnabled: boolean;
+  buddyShowAtStartup: boolean;
+  buddySize: "small" | "medium" | "large";
+  buddyAlwaysOnTop: boolean;
+  assistantAllowScreenContext: boolean;
+  assistantVoice: string | null;
+  storeRawTranscript: boolean;
+  storeNormalizedTranscript: boolean;
+  storeCleanedTranscript: boolean;
+  includeTranscriptInLogs: boolean;
+  historyRetentionDays: number;
+  maxHistoryEntries: number;
+  confirmPasteAgain: boolean;
+  debugLogging: boolean;
+  closeToTray: boolean;
+  minimizeToTray: boolean;
+  showNotifications: boolean;
+  lastPage: string;
+}
+
+export type OverlayPosition = "bottom_center" | "bottom_right" | "top_center" | "top_right";
+export type CleanupStyle = "balanced" | "casual" | "developer" | "code_literal";
+
+export interface ShortcutBinding {
+  /** Any of "ctrl", "alt", "shift", "win". */
+  modifiers: string[];
+  /** Main key name, or null for a modifier-only gesture such as Ctrl + Win. */
+  key: string | null;
+}
+
+export interface ShortcutBindings {
+  pushToTalk: ShortcutBinding;
+  handsFree: ShortcutBinding;
+  commandMode: ShortcutBinding;
+  cancel: ShortcutBinding;
+}
+
+export type ShortcutActionId = keyof ShortcutBindings;
+
+export interface AppCleanupStyle {
+  processName: string;
+  style: CleanupStyle;
 }
 
 export interface CredentialStatus {
   deepgram: boolean;
   cleanup: boolean;
+  assistant: boolean;
 }
+
+export interface AssistantStateEvent { requestId: string; state: "thinking" | "streaming" | "completed" | "error"; message?: string; }
+export interface AssistantDeltaEvent { requestId: string; delta: string; }
+export interface AssistantConversationTurn { role: "user" | "assistant"; content: string; }
 
 export interface DashboardStats {
   dailyWords: number;

@@ -1,71 +1,258 @@
-import { Braces, Bug, Check, ClipboardCopy, FileText, List, MessageSquareText, Sparkles, WandSparkles } from "lucide-react";
+import {
+  Braces,
+  Bug,
+  ClipboardCopy,
+  FileText,
+  List,
+  MessageSquareText,
+  Search,
+  Sparkles,
+  WandSparkles,
+} from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
+import { useLocation } from "react-router-dom";
 import { useAppStore } from "../app/useAppStore";
 import { Button } from "../components/common/Button";
-import { native } from "../lib/native";
+import { InfoBar } from "../components/fluent/InfoBar";
+import { SettingsRow, SettingsSection } from "../components/fluent/SettingsRow";
+import { ToggleSwitch } from "../components/fluent/ToggleSwitch";
+import { defaultSettings, native } from "../lib/native";
+import type { AppSettings } from "../types/models";
+import { diffWords } from "./textDiff";
 
-type Transform = {
+interface Transform {
   id: string;
   name: string;
   description: string;
   icon: typeof WandSparkles;
-  accent: string;
-};
+  /** Only some transforms are safe to run unattended after every dictation. */
+  autoApplicable: boolean;
+}
 
-const transforms: Transform[] = [
-  { id: "polish", name: "Polish", description: "Clear, natural writing that keeps your meaning and tone.", icon: WandSparkles, accent: "mint" },
-  { id: "prompt_engineer", name: "Prompt Engineer", description: "Turn rough intent into an executable prompt for an AI agent.", icon: Sparkles, accent: "blue" },
-  { id: "developer_task", name: "Developer Task", description: "Shape technical speech into requirements and acceptance criteria.", icon: Braces, accent: "violet" },
-  { id: "bug_report", name: "Bug Report", description: "Extract expected behavior, actual behavior, and reproduction steps.", icon: Bug, accent: "orange" },
-  { id: "commit_message", name: "Commit Message", description: "Create a concise conventional commit with an optional body.", icon: MessageSquareText, accent: "rose" },
-  { id: "documentation", name: "Documentation", description: "Organize dictation into readable technical documentation.", icon: FileText, accent: "cyan" },
-  { id: "turn_into_list", name: "Turn Into List", description: "Convert prose into a clean, ordered set of points.", icon: List, accent: "lime" },
+const TRANSFORMS: Transform[] = [
+  { id: "polish", name: "Polish", description: "Improve grammar and readability while preserving meaning.", icon: WandSparkles, autoApplicable: true },
+  { id: "prompt_engineer", name: "Prompt Engineer", description: "Turn rough dictation into a structured AI prompt.", icon: Sparkles, autoApplicable: true },
+  { id: "developer_task", name: "Developer Task", description: "Convert speech into a clear implementation task.", icon: Braces, autoApplicable: false },
+  { id: "bug_report", name: "Bug Report", description: "Create steps, expected behaviour, and actual behaviour.", icon: Bug, autoApplicable: false },
+  { id: "commit_message", name: "Commit Message", description: "Generate a concise source-control commit message.", icon: MessageSquareText, autoApplicable: false },
+  { id: "documentation", name: "Documentation", description: "Format the text as technical documentation.", icon: FileText, autoApplicable: false },
+  { id: "turn_into_list", name: "Turn Into List", description: "Convert the transcript into a structured list.", icon: List, autoApplicable: true },
 ];
 
 export function TransformsPage() {
+  const location = useLocation();
   const { lastTranscript } = useAppStore();
-  const [selectedId, setSelectedId] = useState("polish");
+  const [settings, setSettings] = useState<AppSettings>(defaultSettings);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [search, setSearch] = useState("");
   const [input, setInput] = useState("");
   const [output, setOutput] = useState("");
   const [provider, setProvider] = useState("");
+  const [showDiff, setShowDiff] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const selected = useMemo(() => transforms.find((item) => item.id === selectedId) ?? transforms[0], [selectedId]);
+
+  useEffect(() => {
+    void native.settings().then(setSettings);
+  }, []);
+
+  // History can hand a transcript straight to this page.
+  useEffect(() => {
+    const handed = (location.state as { text?: string } | null)?.text;
+    if (handed) setInput(handed);
+  }, [location.state]);
 
   useEffect(() => {
     if (!input && lastTranscript) setInput(lastTranscript.finalTranscript);
   }, [input, lastTranscript]);
 
-  const run = async () => {
+  const selected = TRANSFORMS.find((entry) => entry.id === selectedId) ?? null;
+
+  const visible = useMemo(() => {
+    const needle = search.trim().toLocaleLowerCase();
+    if (!needle) return TRANSFORMS;
+    return TRANSFORMS.filter((entry) =>
+      `${entry.name} ${entry.description}`.toLocaleLowerCase().includes(needle),
+    );
+  }, [search]);
+
+  const diff = useMemo(() => (output ? diffWords(input, output) : []), [input, output]);
+
+  const run = async (transformId: string) => {
     if (!input.trim()) return;
     setBusy(true);
     setError(null);
     try {
-      const result = await native.transform(input, selected.id);
+      const result = await native.transform(input, transformId);
       setOutput(result.transformedText);
       setProvider(result.provider);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Transform failed. Your original text is unchanged.");
+      setError(cause instanceof Error ? cause.message : "The transform failed. Your original text is unchanged.");
     } finally {
       setBusy(false);
     }
   };
 
+  const setAutoApply = async (id: string, enabled: boolean) => {
+    const next = { ...settings, autoApplyTransform: enabled ? id : null };
+    setSettings(next);
+    await native.saveSettings(next);
+  };
+
   return (
-    <div className="page page--transforms">
-      <header className="page-header"><div><span className="eyebrow">NEXT-STAGE OUTPUT</span><h1>Transforms</h1><p>Preview an improved version before anything is copied or inserted. Provider failures fall back to deterministic local transforms.</p></div></header>
-      <div className="transform-layout">
-        <section className="transform-grid">
-          {transforms.map(({ id, name, description, icon: Icon, accent }) => <button className={`transform-card ${id === selected.id ? "transform-card--selected" : ""}`} key={id} onClick={() => { setSelectedId(id); setOutput(""); }}><span className={`transform-icon transform-icon--${accent}`}><Icon size={20} /></span><h2>{name}</h2><p>{description}</p><small>{id === "polish" || id === "prompt_engineer" ? "Ready to run" : "Preset scaffold"}</small></button>)}
-        </section>
-        <section className="transform-editor">
-          <div className="editor-heading"><div><span className="eyebrow">{selected.name.toUpperCase()}</span><h2>Preview workspace</h2></div><span className="editor-provider">{provider ? `via ${provider}` : "No changes applied"}</span></div>
-          <label className="editor-field"><span>Original text</span><textarea value={input} onChange={(event) => setInput(event.target.value)} placeholder="Paste or type rough text here…" /></label>
-          <div className="editor-actions"><Button variant="primary" disabled={!input.trim() || busy} onClick={() => void run()} icon={busy ? <span className="button-spinner" /> : <Sparkles size={15} />}>{busy ? "Transforming…" : `Run ${selected.name}`}</Button>{lastTranscript && <Button variant="ghost" onClick={() => { setInput(lastTranscript.finalTranscript); setOutput(""); }}>Use last transcript</Button>}</div>
-          {error && <p className="transform-error">{error}</p>}
-          <div className="result-panel"><div className="result-heading"><span>Transformed text</span>{output && <div><Button variant="ghost" icon={<ClipboardCopy size={14} />} onClick={() => void native.copyText(output)}>Copy</Button><Button variant="ghost" icon={<Check size={14} />} onClick={() => { setInput(output); setOutput(""); }}>Replace input</Button></div>}</div>{output ? <><div className="transform-result">{output}</div><div className="transform-diff"><span className="diff-removed">− {input}</span><span className="diff-added">＋ {output}</span></div></> : <p className="empty-copy">Your preview will appear here. The original stays intact until you choose to replace it.</p>}</div>
-        </section>
-      </div>
+    <div className="page">
+      <header className="page-header">
+        <h1>Transforms</h1>
+        <p className="page-header__meta">
+          <span>Apply structured formatting to the latest transcript or a selected history item.</span>
+        </p>
+      </header>
+
+      {error && <InfoBar severity="error" title="Transform failed" message={error} />}
+      {provider.startsWith("local") && output && (
+        <InfoBar
+          severity="warning"
+          title="AI cleanup was unavailable"
+          message="VoiceFlow applied its local transform rules instead. The result is more conservative than the AI version."
+        />
+      )}
+
+      {selected ? (
+        <>
+          <div className="workspace-header">
+            <div>
+              <h2>{selected.name}</h2>
+              <p>{selected.description}</p>
+            </div>
+            <Button variant="secondary" onClick={() => { setSelectedId(null); setOutput(""); }}>
+              Back to all transforms
+            </Button>
+          </div>
+
+          <div className="workspace">
+            <label className="workspace__pane">
+              <span className="workspace__label">Original</span>
+              <textarea
+                value={input}
+                placeholder="Paste or type text here…"
+                onChange={(event) => {
+                  setInput(event.target.value);
+                  setOutput("");
+                }}
+              />
+            </label>
+            <div className="workspace__pane">
+              <span className="workspace__label">
+                Preview
+                {provider && <em className="workspace__provider">via {provider}</em>}
+              </span>
+              <div className="workspace__preview">
+                {output || <span className="transcript-paper__empty">Run the transform to see the result. The original stays intact.</span>}
+              </div>
+            </div>
+          </div>
+
+          <div className="command-row">
+            <Button variant="primary" disabled={!input.trim() || busy} onClick={() => void run(selected.id)}>
+              {busy ? "Applying…" : "Apply"}
+            </Button>
+            <Button variant="secondary" disabled={!output} icon={<ClipboardCopy size={15} />} onClick={() => void native.copyText(output)}>
+              Copy
+            </Button>
+            <Button
+              variant="secondary"
+              disabled={!output}
+              onClick={() => {
+                setInput(output);
+                setOutput("");
+              }}
+            >
+              Replace original
+            </Button>
+            {lastTranscript && (
+              <Button variant="secondary" onClick={() => { setInput(lastTranscript.finalTranscript); setOutput(""); }}>
+                Use last transcript
+              </Button>
+            )}
+          </div>
+
+          {output && (
+            <SettingsSection title="Changes">
+              <div className="settings-row">
+                <span className="settings-row__text">
+                  <strong>Show differences</strong>
+                  <small>Insertions and deletions between the original and the preview.</small>
+                </span>
+                <span className="settings-row__action">
+                  <ToggleSwitch label="Show differences" checked={showDiff} onChange={setShowDiff} />
+                </span>
+              </div>
+              {showDiff && (
+                <div className="diff-view">
+                  {diff.map((segment, index) => (
+                    <span key={index} className={`diff-${segment.type}`}>
+                      {segment.text}
+                    </span>
+                  ))}
+                </div>
+              )}
+            </SettingsSection>
+          )}
+        </>
+      ) : (
+        <>
+          <div className="command-bar">
+            <label className="search-field">
+              <Search size={15} aria-hidden="true" />
+              <input
+                value={search}
+                aria-label="Search transforms"
+                placeholder="Search transforms"
+                onChange={(event) => setSearch(event.target.value)}
+              />
+            </label>
+          </div>
+
+          <div className="settings-group__rows">
+            {visible.map((entry) => (
+              <div className="settings-row" key={entry.id}>
+                <span className="settings-row__icon">
+                  <entry.icon size={17} aria-hidden="true" />
+                </span>
+                <span className="settings-row__text">
+                  <strong>{entry.name}</strong>
+                  <small>{entry.description}</small>
+                </span>
+                <span className="settings-row__action">
+                  <Button variant="secondary" onClick={() => { setSelectedId(entry.id); setOutput(""); }}>
+                    Run
+                  </Button>
+                </span>
+              </div>
+            ))}
+          </div>
+
+          <SettingsSection
+            title="Automatically apply after dictation"
+            description="Runs after cleanup and before the text is inserted. Only transforms that are safe to run unattended can be selected."
+          >
+            {TRANSFORMS.filter((entry) => entry.autoApplicable).map((entry) => (
+              <SettingsRow
+                key={entry.id}
+                label={entry.name}
+                description={entry.description}
+                action={
+                  <ToggleSwitch
+                    label={`Automatically apply ${entry.name}`}
+                    checked={settings.autoApplyTransform === entry.id}
+                    onChange={(enabled) => void setAutoApply(entry.id, enabled)}
+                  />
+                }
+              />
+            ))}
+          </SettingsSection>
+        </>
+      )}
     </div>
   );
 }

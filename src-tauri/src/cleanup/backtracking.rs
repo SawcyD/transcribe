@@ -1,12 +1,43 @@
 use regex::Regex;
 
+/// Which deterministic cleanup passes to run. Each maps to a user-facing toggle
+/// on the Dictation page.
+#[derive(Debug, Clone, Copy)]
+pub struct BacktrackingOptions {
+    /// Spoken corrections: "delete the last sentence", "replace X with Y".
+    pub backtracking: bool,
+    pub remove_filler_words: bool,
+    pub remove_false_starts: bool,
+}
+
+impl Default for BacktrackingOptions {
+    fn default() -> Self {
+        Self {
+            backtracking: true,
+            remove_filler_words: true,
+            remove_false_starts: true,
+        }
+    }
+}
+
 pub fn resolve_explicit_backtracking(input: &str) -> String {
-    let mut text = remove_delete_last_sentence(input);
-    text = apply_replace_command(&text);
-    text = resolve_correction_marker(&text);
-    text = apply_identifier_casing(&text);
-    text = remove_fillers(&text);
-    text = remove_repeated_phrases(&text);
+    resolve_with_options(input, BacktrackingOptions::default())
+}
+
+pub fn resolve_with_options(input: &str, options: BacktrackingOptions) -> String {
+    let mut text = input.to_string();
+    if options.backtracking {
+        text = remove_delete_last_sentence(&text);
+        text = apply_replace_command(&text);
+        text = resolve_correction_marker(&text);
+        text = apply_identifier_casing(&text);
+    }
+    if options.remove_filler_words {
+        text = remove_fillers(&text);
+    }
+    if options.remove_false_starts {
+        text = remove_repeated_phrases(&text);
+    }
     clean_spacing(&text)
 }
 

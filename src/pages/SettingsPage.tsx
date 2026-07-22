@@ -1,76 +1,450 @@
-import { Check, KeyRound, Mic2, Save, ShieldCheck, SlidersHorizontal } from "lucide-react";
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { disable, enable, isEnabled } from "@tauri-apps/plugin-autostart";
+import { useEffect, useMemo, useState } from "react";
+import { ComboBox } from "@memora/ui";
 import { Button } from "../components/common/Button";
-import { defaultSettings, native } from "../lib/native";
-import type { AppSettings, CredentialStatus } from "../types/models";
+import { ContentDialog } from "../components/fluent/ContentDialog";
+import { InfoBar } from "../components/fluent/InfoBar";
+import { SettingsRow, SettingsSection } from "../components/fluent/SettingsRow";
+import { ToggleSwitch } from "../components/fluent/ToggleSwitch";
+import { defaultSettings, isTauri, native } from "../lib/native";
+import type { AppSettings, CleanupStyle, CredentialStatus, OverlayPosition } from "../types/models";
 import { validateSettings } from "./settingsValidation";
 
 export function SettingsPage() {
   const [settings, setSettings] = useState<AppSettings>(defaultSettings);
-  const [credentials, setCredentials] = useState<CredentialStatus>({ deepgram: false, cleanup: false });
-  const [microphones, setMicrophones] = useState<string[]>([]);
-  const [deepgramKey, setDeepgramKey] = useState("");
-  const [cleanupKey, setCleanupKey] = useState("");
+  const [credentials, setCredentials] = useState<CredentialStatus>({ deepgram: false, cleanup: false, assistant: false });
+  const [launchOnStartup, setLaunchOnStartup] = useState(false);
+  const [credentialDialog, setCredentialDialog] = useState<"deepgram" | "cleanup" | null>(null);
+  const [secret, setSecret] = useState("");
+  const [clearingHistory, setClearingHistory] = useState(false);
+  const [resetting, setResetting] = useState(false);
+  const [report, setReport] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
+
   const errors = useMemo(() => validateSettings(settings), [settings]);
   const valid = Object.keys(errors).length === 0;
 
   useEffect(() => {
-    void Promise.all([native.settings(), native.credentialStatus(), native.microphones()]).then(([stored, status, devices]) => {
-      setSettings(stored);
-      setCredentials(status);
-      setMicrophones(devices);
-    });
+    const startup = isTauri() ? isEnabled() : Promise.resolve(false);
+    void Promise.all([native.settings(), native.credentialStatus(), startup]).then(
+      ([stored, status, startupEnabled]) => {
+        setSettings(stored);
+        setCredentials(status);
+        setLaunchOnStartup(startupEnabled);
+      },
+    );
   }, []);
 
-  const update = <K extends keyof AppSettings>(key: K, value: AppSettings[K]) => setSettings((current) => ({ ...current, [key]: value }));
+  const update = <K extends keyof AppSettings>(key: K, value: AppSettings[K]) =>
+    setSettings((current) => ({ ...current, [key]: value }));
+
   const save = async () => {
     if (!valid) return;
     const pending: Promise<unknown>[] = [native.saveSettings(settings)];
-    if (deepgramKey.trim()) pending.push(native.setCredential("deepgram", deepgramKey.trim()));
-    if (cleanupKey.trim()) pending.push(native.setCredential("cleanup", cleanupKey.trim()));
+    if (isTauri()) pending.push(launchOnStartup ? enable() : disable());
     await Promise.all(pending);
-    setDeepgramKey("");
-    setCleanupKey("");
-    setCredentials(await native.credentialStatus());
     setSaved(true);
-    window.setTimeout(() => setSaved(false), 1_800);
+    window.setTimeout(() => setSaved(false), 2000);
+  };
+
+  const storeCredential = async () => {
+    if (!credentialDialog || !secret.trim()) return;
+    await native.setCredential(credentialDialog, secret.trim());
+    setSecret("");
+    setCredentialDialog(null);
+    setCredentials(await native.credentialStatus());
   };
 
   return (
-    <div className="page page--settings">
-      <header className="page-header"><div><span className="eyebrow">NATIVE CONFIGURATION</span><h1>Settings</h1><p>Provider secrets stay in Windows Credential Manager. Non-secret behavior is stored in the local SQLite database.</p></div><Button variant="primary" disabled={!valid} icon={saved ? <Check size={16} /> : <Save size={16} />} onClick={() => void save()}>{saved ? "Saved" : "Save changes"}</Button></header>
+    <div className="page">
+      <header className="page-header">
+        <h1>Settings</h1>
+        <p className="page-header__meta">
+          <span>Application behaviour, providers, privacy, and diagnostics.</span>
+        </p>
+      </header>
 
-      <section className="settings-section"><header><span className="icon-well"><KeyRound size={18} /></span><div><h2>Providers</h2><p>Audio goes to Deepgram; cleaned text goes only to the endpoint below when enabled.</p></div></header><div className="form-grid">
-        <Field label="Deepgram API key" hint={credentials.deepgram ? "Stored securely · enter a value only to replace it" : "Required for streaming transcription"}><input type="password" autoComplete="off" value={deepgramKey} onChange={(event) => setDeepgramKey(event.target.value)} placeholder={credentials.deepgram ? "••••••••••••••••" : "dg_…"} /></Field>
-        <Field label="Deepgram model"><input value={settings.transcriptionModel} onChange={(event) => update("transcriptionModel", event.target.value)} /></Field>
-        <Field label="Language"><select value={settings.language} onChange={(event) => update("language", event.target.value)}><option value="en-US">English (US)</option><option value="en-GB">English (UK)</option><option value="multi">Multilingual</option></select></Field>
-        <Field label="Cleanup API key" hint={credentials.cleanup ? "Stored securely · enter a value only to replace it" : "Optional; deterministic cleanup remains available"}><input type="password" autoComplete="off" value={cleanupKey} onChange={(event) => setCleanupKey(event.target.value)} placeholder={credentials.cleanup ? "••••••••••••••••" : "Provider key"} /></Field>
-        <Field label="Cleanup endpoint" error={errors.cleanupEndpoint}><input value={settings.cleanupEndpoint} onChange={(event) => update("cleanupEndpoint", event.target.value)} /></Field>
-        <Field label="Cleanup model"><input value={settings.cleanupModel} onChange={(event) => update("cleanupModel", event.target.value)} /></Field>
-        <Field label="Cleanup style" hint="Controls how much rewriting is allowed"><select value={settings.cleanupStyle} onChange={(event) => update("cleanupStyle", event.target.value as AppSettings["cleanupStyle"])}><option value="balanced">Balanced</option><option value="casual">Keep casual voice</option><option value="developer">Developer prose</option><option value="code_literal">Code literal</option></select></Field>
-        <Field label="Auto-apply transform" hint="Preview remains available in Transforms; this runs after cleanup before paste"><select value={settings.autoApplyTransform ?? ""} onChange={(event) => update("autoApplyTransform", event.target.value || null)}><option value="">Off</option><option value="polish">Polish</option><option value="prompt_engineer">Prompt Engineer</option><option value="turn_into_list">Turn Into List</option></select></Field>
-      </div><Toggle label="AI cleanup" description="Send normalized text to the configured cleanup provider." checked={settings.cleanupEnabled} onChange={(value) => update("cleanupEnabled", value)} /></section>
+      {!valid && <InfoBar severity="error" title="Some settings are invalid" message={Object.values(errors)[0]} />}
+      {notice && <InfoBar severity="success" title="Settings" message={notice} />}
 
-      <section className="settings-section"><header><span className="icon-well"><Mic2 size={18} /></span><div><h2>Audio</h2><p>Capture uses the device native sample rate and downmixes to mono PCM16.</p></div></header><div className="form-grid">
-        <Field label="Microphone"><select value={settings.microphoneName ?? ""} onChange={(event) => update("microphoneName", event.target.value || null)}><option value="">System default</option>{microphones.map((name) => <option value={name} key={name}>{name}</option>)}</select></Field>
-        <Field label="Noise floor" suffix="dB" error={errors.noiseFloorDb}><input type="number" value={settings.noiseFloorDb} min={-90} max={-10} onChange={(event) => update("noiseFloorDb", Number(event.target.value))} /></Field>
-        <Field label="Session limit" suffix="minutes" error={errors.sessionLimitMinutes}><input type="number" value={settings.sessionLimitMinutes} min={1} max={120} onChange={(event) => update("sessionLimitMinutes", Number(event.target.value))} /></Field>
-      </div><Toggle label="Save recordings" description="Off by default. Failed processing keeps audio in memory only for the active recovery flow." checked={settings.saveAudio} onChange={(value) => update("saveAudio", value)} /></section>
+      <SettingsSection title="General">
+        <SettingsRow
+          label="Start VoiceFlow with Windows"
+          description="Keep dictation shortcuts available after you sign in."
+          action={<ToggleSwitch label="Start VoiceFlow with Windows" checked={launchOnStartup} onChange={setLaunchOnStartup} />}
+        />
+        <SettingsRow
+          label="Minimize to system tray"
+          description="Hide the window from the taskbar when it is minimized."
+          action={<ToggleSwitch label="Minimize to system tray" checked={settings.minimizeToTray} onChange={(value) => update("minimizeToTray", value)} />}
+        />
+        <SettingsRow
+          label="Close window to system tray"
+          description="When off, closing the window exits VoiceFlow and stops the shortcuts."
+          action={<ToggleSwitch label="Close window to system tray" checked={settings.closeToTray} onChange={(value) => update("closeToTray", value)} />}
+        />
+        <SettingsRow
+          label="Show notifications"
+          description="Report insertion results and errors while the window is hidden."
+          action={<ToggleSwitch label="Show notifications" checked={settings.showNotifications} onChange={(value) => update("showNotifications", value)} />}
+        />
+        <SettingsRow
+          label="Theme"
+          description="Follow the Windows theme by default, or choose a fixed appearance."
+          action={
+            <ComboBox
+              label="Theme"
+              value={settings.theme}
+              onChange={(theme) => {
+                update("theme", theme);
+                document.documentElement.dataset.theme = theme === "system" ? "" : theme;
+                document.querySelector(".memora-ui-root")?.setAttribute("data-memora-theme", theme);
+              }}
+              options={[{ value: "system", label: "Use system setting" }, { value: "light", label: "Light" }, { value: "dark", label: "Dark" }]}
+            />
+          }
+        />
+      </SettingsSection>
 
-      <section className="settings-section"><header><span className="icon-well"><SlidersHorizontal size={18} /></span><div><h2>Insertion and privacy</h2><p>Clipboard restoration is best-effort because some target applications read pasted text asynchronously.</p></div></header><div className="form-grid">
-        <Field label="Paste delay" suffix="ms" error={errors.pasteDelayMs}><input type="number" value={settings.pasteDelayMs} min={40} max={2000} onChange={(event) => update("pasteDelayMs", Number(event.target.value))} /></Field>
-      </div><Toggle label="Restore text clipboard" description="Restore the previous text value after the target has accepted the paste." checked={settings.restoreClipboard} onChange={(value) => update("restoreClipboard", value)} /><Toggle label="Save transcript history" description="Store all four transcript stages locally in SQLite." checked={settings.saveHistory} onChange={(value) => update("saveHistory", value)} /><Toggle label="Allow “press enter”" description="Disabled by default. Only an exact phrase at the end of dictation can trigger Enter." checked={settings.pressEnterEnabled} onChange={(value) => update("pressEnterEnabled", value)} /></section>
+      <SettingsSection title="Overlay">
+        <SettingsRow
+          label="Show recording overlay"
+          action={<ToggleSwitch label="Show recording overlay" checked={settings.showOverlay} onChange={(value) => update("showOverlay", value)} />}
+        />
+        <SettingsRow
+          label="Show waveform"
+          action={<ToggleSwitch label="Show waveform" checked={settings.showWaveform} onChange={(value) => update("showWaveform", value)} />}
+        />
+        <SettingsRow
+          label="Play start and stop tones"
+          action={<ToggleSwitch label="Play start and stop tones" checked={settings.playTones} onChange={(value) => update("playTones", value)} />}
+        />
+        <SettingsRow
+          label="Overlay position"
+          action={
+            <select
+              className="settings-combo"
+              aria-label="Overlay position"
+              value={settings.overlayPosition}
+              onChange={(event) => update("overlayPosition", event.target.value as OverlayPosition)}
+            >
+              <option value="bottom_center">Bottom center</option>
+              <option value="bottom_right">Bottom right</option>
+              <option value="top_center">Top center</option>
+              <option value="top_right">Top right</option>
+            </select>
+          }
+        />
+        <SettingsRow
+          label="Overlay opacity"
+          action={
+            <span className="numeric-field">
+              <input
+                type="number"
+                aria-label="Overlay opacity percentage"
+                min={40}
+                max={100}
+                value={settings.overlayOpacity}
+                onChange={(event) => update("overlayOpacity", Number(event.target.value))}
+              />
+              <small>%</small>
+            </span>
+          }
+        />
+      </SettingsSection>
 
-      <section className="privacy-note"><ShieldCheck size={18} /><p><strong>Privacy boundary:</strong> VoiceFlow Dev never records while idle, never stores provider keys in SQLite, and never logs full transcript contents by default.</p></section>
+      <SettingsSection
+        title="Providers"
+        description="Audio goes to Deepgram. Cleaned text goes only to the endpoint below, and only when AI cleanup is on."
+      >
+        <SettingsRow
+          label="Transcription provider"
+          action={<span className="settings-row__value">Deepgram</span>}
+        />
+        <SettingsRow
+          label="Deepgram credential"
+          description="Stored in Windows Credential Manager. It is never displayed back to this interface."
+          action={
+            <>
+              <span className="settings-row__value">{credentials.deepgram ? "Configured" : "Not configured"}</span>
+              <Button variant="secondary" onClick={() => setCredentialDialog("deepgram")}>
+                Configure
+              </Button>
+              <Button
+                variant="secondary"
+                disabled={!credentials.deepgram}
+                onClick={async () => {
+                  await native.deleteCredential("deepgram");
+                  setCredentials(await native.credentialStatus());
+                }}
+              >
+                Remove
+              </Button>
+            </>
+          }
+        />
+        <SettingsRow
+          label="Cleanup provider"
+          action={
+            <input
+              className="settings-input"
+              aria-label="Cleanup endpoint"
+              value={settings.cleanupEndpoint}
+              onChange={(event) => update("cleanupEndpoint", event.target.value)}
+            />
+          }
+        />
+        <SettingsRow
+          label="Cleanup credential"
+          action={
+            <>
+              <span className="settings-row__value">{credentials.cleanup ? "Configured" : "Not configured"}</span>
+              <Button variant="secondary" onClick={() => setCredentialDialog("cleanup")}>
+                Configure
+              </Button>
+              <Button
+                variant="secondary"
+                disabled={!credentials.cleanup}
+                onClick={async () => {
+                  await native.deleteCredential("cleanup");
+                  setCredentials(await native.credentialStatus());
+                }}
+              >
+                Remove
+              </Button>
+            </>
+          }
+        />
+        <SettingsRow
+          label="Cleanup model"
+          action={
+            <input
+              className="settings-input"
+              aria-label="Cleanup model"
+              value={settings.cleanupModel}
+              onChange={(event) => update("cleanupModel", event.target.value)}
+            />
+          }
+        />
+        <SettingsRow
+          label="Default cleanup style"
+          action={
+            <select
+              className="settings-combo"
+              aria-label="Default cleanup style"
+              value={settings.cleanupStyle}
+              onChange={(event) => update("cleanupStyle", event.target.value as CleanupStyle)}
+            >
+              <option value="balanced">Balanced</option>
+              <option value="casual">Casual</option>
+              <option value="developer">Developer</option>
+              <option value="code_literal">Code literal</option>
+            </select>
+          }
+        />
+      </SettingsSection>
+
+      <SettingsSection
+        title="Privacy"
+        description="VoiceFlow never records while idle, never stores provider keys in SQLite, and never logs transcript text by default."
+      >
+        <SettingsRow
+          label="Store dictation history"
+          action={<ToggleSwitch label="Store dictation history" checked={settings.saveHistory} onChange={(value) => update("saveHistory", value)} />}
+        />
+        <SettingsRow
+          label="Store raw transcript"
+          description="The unmodified provider output, before any cleanup."
+          action={<ToggleSwitch label="Store raw transcript" checked={settings.storeRawTranscript} onChange={(value) => update("storeRawTranscript", value)} />}
+        />
+        <SettingsRow
+          label="Store normalized transcript"
+          action={<ToggleSwitch label="Store normalized transcript" checked={settings.storeNormalizedTranscript} onChange={(value) => update("storeNormalizedTranscript", value)} />}
+        />
+        <SettingsRow
+          label="Store cleaned transcript"
+          action={<ToggleSwitch label="Store cleaned transcript" checked={settings.storeCleanedTranscript} onChange={(value) => update("storeCleanedTranscript", value)} />}
+        />
+        <SettingsRow
+          label="Include transcript text in logs"
+          description="Off by default. Turn this on only while reproducing a problem."
+          action={<ToggleSwitch label="Include transcript text in logs" checked={settings.includeTranscriptInLogs} onChange={(value) => update("includeTranscriptInLogs", value)} />}
+        />
+        <SettingsRow
+          label="Allow screen context"
+          description="Controls whether the assistant may capture your screen at all."
+          action={<ToggleSwitch label="Allow screen context" checked={settings.assistantAllowScreenContext} onChange={(value) => update("assistantAllowScreenContext", value)} />}
+        />
+        <SettingsRow
+          label="Confirm before pasting again"
+          action={<ToggleSwitch label="Confirm before pasting again" checked={settings.confirmPasteAgain} onChange={(value) => update("confirmPasteAgain", value)} />}
+        />
+      </SettingsSection>
+
+      <SettingsSection title="History">
+        <SettingsRow
+          label="Automatically delete history"
+          description="Transcripts older than this are removed after each dictation. Zero keeps everything."
+          action={
+            <span className="numeric-field">
+              <input
+                type="number"
+                aria-label="History retention in days"
+                min={0}
+                max={3650}
+                value={settings.historyRetentionDays}
+                onChange={(event) => update("historyRetentionDays", Number(event.target.value))}
+              />
+              <small>days</small>
+            </span>
+          }
+        />
+        <SettingsRow
+          label="Maximum history size"
+          description="Zero means unlimited."
+          action={
+            <span className="numeric-field">
+              <input
+                type="number"
+                aria-label="Maximum stored transcripts"
+                min={0}
+                value={settings.maxHistoryEntries}
+                onChange={(event) => update("maxHistoryEntries", Number(event.target.value))}
+              />
+              <small>entries</small>
+            </span>
+          }
+        />
+        <SettingsRow
+          label="Clear history"
+          description="Removes every stored transcript. Settings and credentials are kept."
+          action={
+            <Button variant="secondary" onClick={() => setClearingHistory(true)}>
+              Clear history
+            </Button>
+          }
+        />
+      </SettingsSection>
+
+      <SettingsSection title="Advanced">
+        <SettingsRow
+          label="Enable debug logging"
+          description="Records more detail. Takes effect after restarting VoiceFlow."
+          action={<ToggleSwitch label="Enable debug logging" checked={settings.debugLogging} onChange={(value) => update("debugLogging", value)} />}
+        />
+        <SettingsRow
+          label="Open log folder"
+          action={
+            <Button variant="secondary" onClick={() => void native.openDataFolder("logs")}>
+              Open
+            </Button>
+          }
+        />
+        <SettingsRow
+          label="Open database folder"
+          action={
+            <Button variant="secondary" onClick={() => void native.openDataFolder("database")}>
+              Open
+            </Button>
+          }
+        />
+        <SettingsRow
+          label="Export diagnostic report"
+          description="A summary of your configuration. Contains no transcript text and no credentials."
+          action={
+            <Button variant="secondary" onClick={async () => setReport(await native.diagnosticReport())}>
+              Generate
+            </Button>
+          }
+        />
+        <SettingsRow
+          label="Reset VoiceFlow"
+          description="Restores every setting to its default. History and credentials are kept."
+          action={
+            <Button variant="secondary" onClick={() => setResetting(true)}>
+              Reset
+            </Button>
+          }
+        />
+      </SettingsSection>
+
+      <div className="command-row">
+        <Button variant="primary" disabled={!valid} onClick={() => void save()}>
+          {saved ? "Saved" : "Save changes"}
+        </Button>
+      </div>
+
+      <ContentDialog
+        open={credentialDialog !== null}
+        title={credentialDialog === "deepgram" ? "Configure Deepgram" : "Configure cleanup provider"}
+        primaryText="Save credential"
+        primaryDisabled={!secret.trim()}
+        onPrimary={() => void storeCredential()}
+        onClose={() => {
+          setCredentialDialog(null);
+          setSecret("");
+        }}
+      >
+        <p>The key is written directly to Windows Credential Manager. VoiceFlow never stores it in the database and never reads it back into this window.</p>
+        <div className="dialog-form">
+          <label>
+            <span>API key</span>
+            <input
+              className="settings-input"
+              type="password"
+              autoComplete="off"
+              value={secret}
+              onChange={(event) => setSecret(event.target.value)}
+            />
+          </label>
+        </div>
+      </ContentDialog>
+
+      <ContentDialog
+        open={clearingHistory}
+        title="Clear all history?"
+        primaryText="Clear history"
+        destructive
+        onPrimary={async () => {
+          const removed = await native.clearHistory();
+          setClearingHistory(false);
+          setNotice(`Removed ${removed} ${removed === 1 ? "transcript" : "transcripts"}.`);
+        }}
+        onClose={() => setClearingHistory(false)}
+      >
+        <p>Every stored transcript and all four of its stages will be permanently deleted. This cannot be undone.</p>
+      </ContentDialog>
+
+      <ContentDialog
+        open={resetting}
+        title="Reset VoiceFlow?"
+        primaryText="Reset settings"
+        destructive
+        onPrimary={async () => {
+          const stored = await native.saveSettings({ ...defaultSettings, lastPage: "/settings" });
+          setSettings(stored);
+          setResetting(false);
+          setNotice("Settings restored to their defaults.");
+        }}
+        onClose={() => setResetting(false)}
+      >
+        <p>All settings return to their defaults, including your shortcuts. Your transcript history and stored credentials are not affected.</p>
+      </ContentDialog>
+
+      <ContentDialog
+        open={report !== null}
+        title="Diagnostic report"
+        primaryText="Copy"
+        onPrimary={() => {
+          if (report) void native.copyText(report);
+          setReport(null);
+        }}
+        closeText="Close"
+        onClose={() => setReport(null)}
+      >
+        <pre className="diagnostic-report">{report}</pre>
+      </ContentDialog>
     </div>
   );
-}
-
-function Field({ label, hint, error, suffix, children }: { label: string; hint?: string; error?: string; suffix?: string; children: ReactNode }) {
-  return <label className="field"><span>{label}</span><div className={suffix ? "input-with-suffix" : ""}>{children}{suffix && <small>{suffix}</small>}</div>{(error ?? hint) && <em className={error ? "field-error" : ""}>{error ?? hint}</em>}</label>;
-}
-
-function Toggle({ label, description, checked, onChange }: { label: string; description: string; checked: boolean; onChange: (value: boolean) => void }) {
-  return <label className="toggle-row"><span><strong>{label}</strong><small>{description}</small></span><input type="checkbox" checked={checked} onChange={(event) => onChange(event.target.checked)} /><i aria-hidden="true" /></label>;
 }

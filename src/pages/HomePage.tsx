@@ -1,76 +1,193 @@
-import { ArrowRight, ClipboardCopy, Mic2, Play, Sparkles, Timer, Waves } from "lucide-react";
+import { Headphones, MessageSquare, Mic, Play } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { InfoRow, ProgressBar, SectionHeader } from "@memora/ui";
 import { useAppStore } from "../app/useAppStore";
 import { Button } from "../components/common/Button";
-import { StatusBadge } from "../components/common/StatusBadge";
+import { InfoBar } from "../components/fluent/InfoBar";
+import { StatusIndicator } from "../components/fluent/StatusIndicator";
 import { native } from "../lib/native";
-import type { AppSettings, CredentialStatus, DashboardStats } from "../types/models";
+import type { AppSettings, CredentialStatus, DictationSnapshot, TranscriptRecord } from "../types/models";
+
+const SHORTCUTS = [
+  { keys: ["Ctrl", "Win"], label: "Push to talk", description: "Hold while speaking, release to insert." },
+  { keys: ["Ctrl", "Win", "Space"], label: "Hands-free dictation", description: "Press to start, press again to finish." },
+  { keys: ["Ctrl", "Alt", "B"], label: "Command Mode", description: "Speak a request to the assistant." },
+  { keys: ["Esc"], label: "Cancel", description: "Discard the active dictation." },
+];
+
+/** Human-readable primary status line, derived from the dictation state machine. */
+function statusHeadline(snapshot: DictationSnapshot, configured: boolean): string {
+  switch (snapshot.state) {
+    case "starting":
+      return "Starting microphone…";
+    case "listening_push_to_talk":
+    case "listening_hands_free":
+      return "Listening";
+    case "finalizing_audio":
+      return "Finishing transcription…";
+    case "transcribing":
+      return "Processing transcription";
+    case "cleaning":
+      return "Cleaning text…";
+    case "inserting":
+      return "Inserting…";
+    case "completed":
+      return "Inserted successfully";
+    case "cancelled":
+      return "Dictation cancelled";
+    case "error":
+      return snapshot.error?.message ?? "Something went wrong";
+    default:
+      return configured ? "Ready" : "Transcription is not configured";
+  }
+}
+
+function elapsedLabel(startedAt: string | null | undefined): string | null {
+  if (!startedAt) return null;
+  const seconds = Math.max(0, Math.floor((Date.now() - new Date(startedAt).getTime()) / 1000));
+  return `${String(Math.floor(seconds / 60)).padStart(2, "0")}:${String(seconds % 60).padStart(2, "0")}`;
+}
 
 export function HomePage() {
   const navigate = useNavigate();
-  const { dictation, lastTranscript } = useAppStore();
+  const { dictation } = useAppStore();
   const [settings, setSettings] = useState<AppSettings | null>(null);
-  const [credentials, setCredentials] = useState<CredentialStatus>({ deepgram: false, cleanup: false });
-  const [stats, setStats] = useState<DashboardStats>({ dailyWords: 0, dailySessions: 0, estimatedMinutesSaved: 0 });
+  const [credentials, setCredentials] = useState<CredentialStatus>({ deepgram: false, cleanup: false, assistant: false });
+  const [recent, setRecent] = useState<TranscriptRecord[]>([]);
+  const [, forceTick] = useState(0);
 
   useEffect(() => {
-    void Promise.all([native.settings(), native.credentialStatus(), native.stats()]).then(([nextSettings, nextCredentials, nextStats]) => {
-      setSettings(nextSettings);
-      setCredentials(nextCredentials);
-      setStats(nextStats);
-    });
-  }, []);
+    void Promise.all([native.settings(), native.credentialStatus(), native.history()]).then(
+      ([nextSettings, nextCredentials, transcripts]) => {
+        setSettings(nextSettings);
+        setCredentials(nextCredentials);
+        setRecent(transcripts.slice(0, 5));
+      },
+    );
+  }, [dictation.state]);
 
   const listening = dictation.state === "listening_push_to_talk" || dictation.state === "listening_hands_free";
-  const ready = credentials.deepgram && dictation.state === "idle";
+
+  // Drive the recording timer without re-rendering the page when idle.
+  useEffect(() => {
+    if (!listening) return;
+    const id = window.setInterval(() => forceTick((tick) => tick + 1), 1000);
+    return () => window.clearInterval(id);
+  }, [listening]);
+
+  const configured = credentials.deepgram;
+  const elapsed = listening ? elapsedLabel(dictation.startedAt) : null;
 
   return (
-    <div className="page page--home">
-      <header className="page-header stagger-1">
-        <div><span className="eyebrow">LOCAL DICTATION WORKSPACE</span><h1>Ready when the thought lands.</h1><p>Capture technical ideas without breaking focus, then place clean text exactly where you were working.</p></div>
-        <StatusBadge state={dictation.state} />
+    <div className="page">
+      <header className="page-header">
+        <h1>VoiceFlow</h1>
+        <p className="page-header__meta">
+          <StatusIndicator state={dictation.state} label={configured ? undefined : "Not configured"} tone={configured ? undefined : "error"} />
+          <span>Microphone: {settings?.microphoneName ?? "System default"}</span>
+          <span>
+            Transcription: {settings?.transcriptionProvider === "deepgram" ? "Deepgram" : settings?.transcriptionProvider}{" "}
+            {settings?.transcriptionModel}
+          </span>
+        </p>
       </header>
 
-      {!credentials.deepgram && (
-        <section className="setup-callout stagger-2">
-          <div className="icon-well"><Sparkles size={19} /></div>
-          <div><strong>Connect transcription to begin</strong><p>Your key is stored in Windows Credential Manager and never exposed to the webview.</p></div>
-          <Button variant="primary" onClick={() => navigate("/settings")} icon={<ArrowRight size={16} />}>Open settings</Button>
-        </section>
+      {!configured && (
+        <InfoBar
+          severity="warning"
+          title="Transcription is not configured"
+          message="Add your Deepgram credential to begin using dictation. It is stored in Windows Credential Manager."
+          action={
+            <Button variant="primary" onClick={() => navigate("/settings")}>
+              Configure provider
+            </Button>
+          }
+        />
       )}
 
-      <section className="hero-card stagger-2">
-        <div className="hero-orbit"><span className={listening ? "mic-core mic-core--active" : "mic-core"}><Mic2 size={31} /></span><i /><i /></div>
-        <div className="hero-copy">
-          <span className="eyebrow">PUSH TO TALK</span>
-          <h2>{listening ? "Listening to your voice" : ready ? "Hold the shortcut and speak" : "Provider setup required"}</h2>
-          <p>{dictation.interimTranscript || "VoiceFlow captures first, connects second, so the beginning of your sentence stays intact."}</p>
-          <div className="shortcut-row"><kbd>Ctrl</kbd><span>+</span><kbd>Win</kbd><small>Hold to record · release to finish</small></div>
-          <p className="shortcut-hint"><kbd>Ctrl</kbd> + <kbd>Win</kbd> + <kbd>Space</kbd> toggles hands-free. <kbd>Ctrl</kbd> + <kbd>Win</kbd> + <kbd>Alt</kbd> enters Command Mode.</p>
-          <div className="hero-actions">
-            <Button
-              variant={listening ? "danger" : "primary"}
-              disabled={!credentials.deepgram && !listening}
-              onClick={() => void (listening ? native.finish() : native.start())}
-              icon={listening ? <Waves size={16} /> : <Play size={16} />}
-            >{listening ? "Finish now" : "Test dictation"}</Button>
-            {!listening && <Button variant="secondary" disabled={!credentials.deepgram} onClick={() => void native.start("hands_free")} icon={<Mic2 size={16} />}>Hands-free</Button>}
+      <section className="status-panel" aria-label="Dictation status">
+        <div className="status-panel__heading">
+          <div>
+            <SectionHeader>Dictation</SectionHeader>
+            <p className="status-panel__headline">{statusHeadline(dictation, configured)}</p>
           </div>
+          <Button
+            variant={listening ? "danger" : "primary"}
+            disabled={!configured && !listening}
+            icon={listening ? <Mic size={16} /> : <Play size={16} />}
+            onClick={() => void (listening ? native.finish() : native.start("hands_free"))}
+          >
+            {listening ? "Finish dictation" : "Start dictation"}
+          </Button>
+        </div>
+        {elapsed && <p className="status-panel__timer">{elapsed}</p>}
+        <p className="status-panel__detail">
+          {dictation.interimTranscript ||
+            (listening ? `Input: ${settings?.microphoneName ?? "System default"}` : "Hold Ctrl + Win to dictate")}
+        </p>
+        {listening && <ProgressBar indeterminate label="Receiving microphone audio" />}
+        <div className="voiceflow-status-rows">
+          <InfoRow label="Mode" value={dictation.mode?.replaceAll("_", " ") ?? settings?.defaultMode?.replaceAll("_", " ") ?? "Push to talk"} />
+          <InfoRow label="Cleanup" value={settings?.cleanupEnabled ? settings.cleanupStyle : "Off"} />
         </div>
       </section>
 
-      <section className="metric-grid stagger-3">
-        <article><span><Waves size={17} />Words today</span><strong>{stats.dailyWords.toLocaleString()}</strong><small>{stats.dailySessions} sessions</small></article>
-        <article><span><Timer size={17} />Time reclaimed</span><strong>{stats.estimatedMinutesSaved.toFixed(1)}m</strong><small>at 40 WPM typing</small></article>
-        <article><span><Mic2 size={17} />Input</span><strong className="metric-text">{settings?.microphoneName ?? "System default"}</strong><small>{settings?.language ?? "en-US"} · mono PCM</small></article>
+      <section className="settings-group" aria-label="Shortcuts">
+        <h2 className="settings-group__title">Shortcuts</h2>
+        <div className="settings-group__rows">
+          {SHORTCUTS.map((shortcut) => (
+            <div className="settings-row" key={shortcut.label}>
+              <span className="settings-row__text">
+                <strong>{shortcut.label}</strong>
+                <small>{shortcut.description}</small>
+              </span>
+              <span className="settings-row__action">
+                <span className="shortcut-chip">
+                  {shortcut.keys.map((key) => (
+                    <kbd key={key}>{key}</kbd>
+                  ))}
+                </span>
+              </span>
+            </div>
+          ))}
+        </div>
       </section>
 
-      <section className="last-card stagger-4">
-        <div className="section-heading"><div><span className="eyebrow">LATEST OUTPUT</span><h2>Last transcript</h2></div>{lastTranscript && <time>{new Date(lastTranscript.createdAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</time>}</div>
-        {lastTranscript ? (
-          <><blockquote>{lastTranscript.finalTranscript}</blockquote><div className="last-actions"><span>{lastTranscript.applicationName ?? "Unknown app"} · {lastTranscript.insertionStatus}</span><Button variant="ghost" onClick={() => void native.copyText(lastTranscript.finalTranscript)} icon={<ClipboardCopy size={16} />}>Copy</Button><Button variant="ghost" onClick={() => navigate("/history")}>View details</Button></div></>
-        ) : <p className="empty-copy">Your first successful dictation will appear here.</p>}
+      <div className="command-row command-row--secondary">
+        <Button variant="secondary" disabled={!configured || listening} icon={<MessageSquare size={16} />} onClick={() => void native.start("command")}>
+          Open Command Mode
+        </Button>
+        <Button variant="secondary" disabled={!configured || listening} icon={<Headphones size={16} />} onClick={() => void native.start("call")}>
+          Call Mode
+        </Button>
+      </div>
+
+      <section className="settings-group" aria-label="Recent activity">
+        <h2 className="settings-group__title">Recent activity</h2>
+        {recent.length === 0 ? (
+          <div className="empty-state">
+            <strong>No dictations yet</strong>
+            <p>Hold Ctrl + Win and start speaking.</p>
+          </div>
+        ) : (
+          <div className="settings-group__rows">
+            {recent.map((record) => (
+              <button
+                type="button"
+                key={record.id}
+                className="settings-row settings-row--interactive activity-row"
+                onClick={() => navigate("/history", { state: { transcriptId: record.id } })}
+              >
+                <time>{new Date(record.createdAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</time>
+                <span className="activity-row__app">{record.applicationName ?? "Unknown app"}</span>
+                <span className="activity-row__words">
+                  {record.finalTranscript.trim().split(/\s+/).filter(Boolean).length} words
+                </span>
+              </button>
+            ))}
+          </div>
+        )}
       </section>
     </div>
   );

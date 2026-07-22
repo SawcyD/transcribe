@@ -1,6 +1,6 @@
 use std::str::FromStr;
 
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Duration, Utc};
 use rusqlite::{params, OptionalExtension, Row};
 
 use crate::{
@@ -54,6 +54,44 @@ impl Database {
             )?;
             let rows = statement.query_map(params![query.trim(), pattern], transcript_from_row)?;
             rows.collect::<Result<Vec<_>, _>>().map_err(AppError::from)
+        })
+    }
+
+    pub fn clear_transcripts(&self) -> Result<usize, AppError> {
+        self.with_connection(|connection| {
+            connection
+                .execute("DELETE FROM transcripts", [])
+                .map_err(AppError::from)
+        })
+    }
+
+    /// Enforces the retention settings. `0` disables either limit.
+    pub fn prune_transcripts(
+        &self,
+        retention_days: u32,
+        max_entries: u32,
+    ) -> Result<usize, AppError> {
+        if retention_days == 0 && max_entries == 0 {
+            return Ok(0);
+        }
+        self.with_connection(|connection| {
+            let mut removed = 0usize;
+            if retention_days > 0 {
+                let cutoff = Utc::now() - Duration::days(i64::from(retention_days));
+                removed += connection.execute(
+                    "DELETE FROM transcripts WHERE created_at < ?1",
+                    params![cutoff.to_rfc3339()],
+                )?;
+            }
+            if max_entries > 0 {
+                removed += connection.execute(
+                    r#"DELETE FROM transcripts WHERE id NOT IN (
+                           SELECT id FROM transcripts ORDER BY created_at DESC LIMIT ?1
+                       )"#,
+                    params![max_entries],
+                )?;
+            }
+            Ok(removed)
         })
     }
 
@@ -135,6 +173,7 @@ fn mode_str(value: DictationMode) -> &'static str {
     match value {
         DictationMode::PushToTalk => "push_to_talk",
         DictationMode::HandsFree => "hands_free",
+        DictationMode::Call => "call",
         DictationMode::Command => "command",
     }
 }
@@ -157,6 +196,7 @@ fn action_str(value: PostPasteAction) -> &'static str {
 fn parse_mode(value: &str) -> DictationMode {
     match value {
         "hands_free" => DictationMode::HandsFree,
+        "call" => DictationMode::Call,
         "command" => DictationMode::Command,
         _ => DictationMode::PushToTalk,
     }

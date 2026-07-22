@@ -4,6 +4,7 @@ use crate::{brand::CREDENTIAL_SERVICE, errors::AppError};
 pub enum CredentialKind {
     Deepgram,
     Cleanup,
+    Assistant,
 }
 
 impl CredentialKind {
@@ -11,6 +12,7 @@ impl CredentialKind {
         match value {
             "deepgram" => Ok(Self::Deepgram),
             "cleanup" => Ok(Self::Cleanup),
+            "assistant" => Ok(Self::Assistant),
             _ => Err(AppError::Configuration(
                 "unknown credential provider".into(),
             )),
@@ -20,6 +22,7 @@ impl CredentialKind {
         match self {
             Self::Deepgram => "deepgram-api-key",
             Self::Cleanup => "cleanup-api-key",
+            Self::Assistant => "assistant-api-key",
         }
     }
 }

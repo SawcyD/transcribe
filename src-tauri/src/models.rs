@@ -22,6 +22,7 @@ pub enum DictationState {
 pub enum DictationMode {
     PushToTalk,
     HandsFree,
+    Call,
     Command,
 }
 
@@ -154,6 +155,40 @@ pub struct DictionaryEntryInput {
     pub enabled: bool,
 }
 
+/// Maps a process name to the cleanup style used while it is focused.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AppCleanupStyle {
+    /// Executable name, matched case-insensitively, e.g. "code.exe".
+    pub process_name: String,
+    pub style: String,
+}
+
+impl AppCleanupStyle {
+    /// Seeds the mapping table with the applications VoiceFlow previously
+    /// hardcoded, so the behaviour is now visible and editable.
+    pub fn defaults() -> Vec<Self> {
+        [
+            ("code.exe", "developer"),
+            ("cursor.exe", "developer"),
+            ("robloxstudiobeta.exe", "developer"),
+            ("windowsterminal.exe", "code_literal"),
+            ("powershell.exe", "code_literal"),
+            ("pwsh.exe", "code_literal"),
+            ("cmd.exe", "code_literal"),
+            ("discord.exe", "casual"),
+        ]
+        .into_iter()
+        .map(|(process_name, style)| Self {
+            process_name: process_name.into(),
+            style: style.into(),
+        })
+        .collect()
+    }
+}
+
+pub const CLEANUP_STYLES: [&str; 4] = ["balanced", "casual", "developer", "code_literal"];
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct AppSettings {
@@ -173,6 +208,53 @@ pub struct AppSettings {
     pub save_audio: bool,
     pub session_limit_minutes: u32,
     pub noise_floor_db: f32,
+    pub call_mode_application: String,
+    pub call_mode_output_device_name: Option<String>,
+    pub theme: String,
+    pub buddy_stroll_enabled: bool,
+    pub buddy_speak_responses: bool,
+    pub assistant_endpoint: String,
+    pub assistant_model: String,
+    /// Hide to the tray instead of exiting when the main window is closed.
+    pub shortcuts: crate::shortcuts::ShortcutBindings,
+    /// Mode used by the Home and tray "start dictation" affordances.
+    pub default_mode: DictationMode,
+    pub auto_detect_developer_apps: bool,
+    /// Per-process cleanup style overrides, consulted before the built-in list.
+    pub app_cleanup_styles: Vec<AppCleanupStyle>,
+    pub remove_filler_words: bool,
+    pub remove_false_starts: bool,
+    pub backtracking_enabled: bool,
+    pub spoken_formatting_enabled: bool,
+    pub voice_actions_enabled: bool,
+    pub show_overlay: bool,
+    pub show_waveform: bool,
+    pub play_tones: bool,
+    pub overlay_position: String,
+    /// Overlay opacity as a percentage, 40–100.
+    pub overlay_opacity: u32,
+    pub buddy_enabled: bool,
+    pub buddy_show_at_startup: bool,
+    pub buddy_size: String,
+    pub buddy_always_on_top: bool,
+    pub assistant_allow_screen_context: bool,
+    pub assistant_voice: Option<String>,
+    pub store_raw_transcript: bool,
+    pub store_normalized_transcript: bool,
+    pub store_cleaned_transcript: bool,
+    pub include_transcript_in_logs: bool,
+    /// Days of history to keep. `0` means keep everything.
+    pub history_retention_days: u32,
+    /// Maximum stored transcripts. `0` means unlimited.
+    pub max_history_entries: u32,
+    pub confirm_paste_again: bool,
+    pub debug_logging: bool,
+    pub close_to_tray: bool,
+    /// Hide from the taskbar when the main window is minimised.
+    pub minimize_to_tray: bool,
+    pub show_notifications: bool,
+    /// Navigation route restored on the next launch.
+    pub last_page: String,
 }
 
 impl Default for AppSettings {
@@ -194,11 +276,70 @@ impl Default for AppSettings {
             save_audio: false,
             session_limit_minutes: 20,
             noise_floor_db: -52.0,
+            call_mode_application: "Discord".into(),
+            call_mode_output_device_name: None,
+            theme: "system".into(),
+            buddy_stroll_enabled: false,
+            buddy_speak_responses: false,
+            assistant_endpoint: "https://api.openai.com/v1".into(),
+            assistant_model: "gpt-4.1-mini".into(),
+            shortcuts: crate::shortcuts::ShortcutBindings::default(),
+            default_mode: DictationMode::PushToTalk,
+            auto_detect_developer_apps: true,
+            app_cleanup_styles: AppCleanupStyle::defaults(),
+            remove_filler_words: true,
+            remove_false_starts: true,
+            backtracking_enabled: true,
+            spoken_formatting_enabled: true,
+            voice_actions_enabled: true,
+            show_overlay: true,
+            show_waveform: true,
+            play_tones: true,
+            overlay_position: "bottom_center".into(),
+            overlay_opacity: 90,
+            buddy_enabled: true,
+            buddy_show_at_startup: true,
+            buddy_size: "medium".into(),
+            buddy_always_on_top: true,
+            assistant_allow_screen_context: true,
+            assistant_voice: None,
+            store_raw_transcript: true,
+            store_normalized_transcript: true,
+            store_cleaned_transcript: true,
+            include_transcript_in_logs: false,
+            history_retention_days: 0,
+            max_history_entries: 0,
+            confirm_paste_again: true,
+            debug_logging: false,
+            close_to_tray: true,
+            minimize_to_tray: false,
+            show_notifications: true,
+            last_page: "/".into(),
         }
     }
 }
 
 impl AppSettings {
+    /// Resolves the cleanup style for the focused application.
+    ///
+    /// An explicit mapping always wins. Otherwise the configured default is
+    /// used, and app detection only upgrades "balanced" so a deliberate style
+    /// choice is never silently overridden.
+    pub fn cleanup_style_for(&self, process: Option<&str>) -> String {
+        if self.auto_detect_developer_apps {
+            if let Some(process) = process {
+                if let Some(mapping) = self
+                    .app_cleanup_styles
+                    .iter()
+                    .find(|mapping| mapping.process_name.eq_ignore_ascii_case(process))
+                {
+                    return mapping.style.clone();
+                }
+            }
+        }
+        self.cleanup_style.clone()
+    }
+
     pub fn validate(&self) -> Result<(), String> {
         if !(40..=2_000).contains(&self.paste_delay_ms) {
             return Err("paste delay must be between 40 and 2000 milliseconds".into());
@@ -215,16 +356,71 @@ impl AppSettings {
         if endpoint.scheme() != "https" && !local {
             return Err("cleanup endpoint must use HTTPS unless it is local".into());
         }
-        if self.transcription_model.trim().is_empty() || self.cleanup_model.trim().is_empty() {
+        let assistant_endpoint = url::Url::parse(&self.assistant_endpoint)
+            .map_err(|_| "assistant endpoint is not a valid URL")?;
+        let assistant_local = matches!(
+            assistant_endpoint.host_str(),
+            Some("localhost" | "127.0.0.1")
+        );
+        if assistant_endpoint.scheme() != "https" && !assistant_local {
+            return Err("assistant endpoint must use HTTPS unless it is local".into());
+        }
+        if self.transcription_model.trim().is_empty()
+            || self.cleanup_model.trim().is_empty()
+            || self.assistant_model.trim().is_empty()
+        {
             return Err("provider model names cannot be empty".into());
         }
-        if !matches!(
-            self.cleanup_style.as_str(),
-            "balanced" | "casual" | "developer" | "code_literal"
-        ) {
+        if !CLEANUP_STYLES.contains(&self.cleanup_style.as_str()) {
             return Err(
                 "cleanup style must be balanced, casual, developer, or code_literal".into(),
             );
+        }
+        for mapping in &self.app_cleanup_styles {
+            if mapping.process_name.trim().is_empty() {
+                return Err("application cleanup mappings need a process name".into());
+            }
+            if !CLEANUP_STYLES.contains(&mapping.style.as_str()) {
+                return Err(format!(
+                    "{} is mapped to an unknown cleanup style",
+                    mapping.process_name
+                ));
+            }
+        }
+        if !(40..=100).contains(&self.overlay_opacity) {
+            return Err("overlay opacity must be between 40 and 100 percent".into());
+        }
+        if !matches!(
+            self.overlay_position.as_str(),
+            "bottom_center" | "bottom_right" | "top_center" | "top_right"
+        ) {
+            return Err("overlay position is not a supported anchor".into());
+        }
+        if !matches!(self.buddy_size.as_str(), "small" | "medium" | "large") {
+            return Err("buddy size must be small, medium, or large".into());
+        }
+        if !matches!(self.theme.as_str(), "system" | "light" | "dark") {
+            return Err("theme must be system, light, or dark".into());
+        }
+        if let Some(conflict) = self.shortcuts.conflict() {
+            return Err(conflict);
+        }
+        if self.history_retention_days > 3_650 {
+            return Err("history retention must be 3650 days or fewer".into());
+        }
+        // Restored on launch and handed straight to the router, so it must stay a
+        // known in-app route rather than arbitrary caller-supplied text.
+        if !matches!(
+            self.last_page.as_str(),
+            "/" | "/dictation"
+                | "/transforms"
+                | "/dictionary"
+                | "/history"
+                | "/assistant-settings"
+                | "/settings"
+                | "/about"
+        ) {
+            return Err("last page must be a known VoiceFlow route".into());
         }
         Ok(())
     }
@@ -235,6 +431,7 @@ impl AppSettings {
 pub struct CredentialStatus {
     pub deepgram: bool,
     pub cleanup: bool,
+    pub assistant: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -324,5 +521,9 @@ mod tests {
         .unwrap();
         assert_eq!(settings.cleanup_style, "balanced");
         assert!(settings.auto_apply_transform.is_none());
+        assert!(!settings.buddy_stroll_enabled);
+        assert!(!settings.buddy_speak_responses);
+        assert_eq!(settings.assistant_model, "gpt-4.1-mini");
+        assert_eq!(settings.theme, "system");
     }
 }

@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "VoiceFlow Dev",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "identifier": "dev.voiceflow.desktop",
   "build": {
     "frontendDist": "../dist",
@@ -20,18 +20,22 @@
         "minHeight": 620,
         "resizable": true,
         "fullscreen": false,
-        "center": true
+        "center": true,
+        "transparent": false,
+        "windowEffects": {
+          "effects": ["mica"]
+        }
       },
       {
         "label": "overlay",
         "title": "VoiceFlow Dev Recording",
         "url": "index.html#/overlay",
-        "width": 156,
-        "height": 36,
-        "minWidth": 156,
-        "minHeight": 36,
-        "maxWidth": 156,
-        "maxHeight": 36,
+        "width": 260,
+        "height": 44,
+        "minWidth": 260,
+        "minHeight": 44,
+        "maxWidth": 260,
+        "maxHeight": 44,
         "resizable": false,
         "decorations": false,
         "transparent": true,
@@ -40,14 +44,50 @@
         "skipTaskbar": true,
         "focus": false,
         "visible": false
+      },
+      {
+        "label": "buddy",
+        "title": "VoiceFlow Buddy",
+        "url": "index.html#/buddy",
+        "width": 144,
+        "height": 144,
+        "minWidth": 144,
+        "minHeight": 144,
+        "maxWidth": 144,
+        "maxHeight": 144,
+        "resizable": false,
+        "decorations": false,
+        "transparent": true,
+        "shadow": false,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "focus": false,
+        "visible": true
+      },
+      {
+        "label": "assistant",
+        "title": "VoiceFlow Assistant",
+        "url": "index.html#/assistant",
+        "width": 430,
+        "height": 420,
+        "minWidth": 360,
+        "minHeight": 260,
+        "resizable": true,
+        "decorations": false,
+        "transparent": true,
+        "shadow": false,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "visible": false
       }
     ],
     "security": {
-      "csp": "default-src 'self'; connect-src ipc: http://ipc.localhost; img-src 'self' asset: http://asset.localhost; style-src 'self' 'unsafe-inline'; font-src 'self'"
+      "csp": "default-src 'self'; connect-src ipc: http://ipc.localhost; img-src 'self' asset: http://asset.localhost data:; style-src 'self' 'unsafe-inline'; font-src 'self'"
     }
   },
   "bundle": {
     "active": true,
+    "createUpdaterArtifacts": true,
     "targets": ["nsis", "msi"],
     "icon": [
       "icons/32x32.png",
@@ -58,6 +98,17 @@
     ],
     "android": {
       "debugApplicationIdSuffix": ".debug"
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDU5MTRBRTQyMzJCQzJCMkMKUldRc0s3d3lRcTRVV1FHSWVXM0xXbXhFUVdvdyszTitEWnA2c3c0WnJTZlM2Y2luUWsrTXpRWHAK",
+      "endpoints": [
+        "https://github.com/SawcyD/transcribe/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
     }
   }
 }

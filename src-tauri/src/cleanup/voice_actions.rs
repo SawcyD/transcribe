@@ -10,6 +10,18 @@ pub struct VoiceActionResult {
     pub cancel_requested: bool,
 }
 
+impl VoiceActionResult {
+    /// Text passed through untouched, for when voice actions are disabled.
+    pub fn none(text: &str) -> Self {
+        Self {
+            text: text.trim().to_string(),
+            action: PostPasteAction::None,
+            finish_requested: false,
+            cancel_requested: false,
+        }
+    }
+}
+
 pub fn extract_trailing_action(input: &str, enter_enabled: bool) -> VoiceActionResult {
     let action = Regex::new(r"(?i)(?:[,.;—-]\s*|\s+)(press enter|submit|press tab|new line|finish dictation|cancel dictation)[.!?]*\s*$").expect("static regex is valid");
     let Some(captures) = action.captures(input) else {

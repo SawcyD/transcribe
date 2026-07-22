@@ -1,74 +1,109 @@
 use std::sync::{
     atomic::{AtomicBool, Ordering},
-    OnceLock,
+    OnceLock, RwLock,
 };
 use std::time::Duration;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 
 use windows::Win32::{
     Foundation::{LPARAM, LRESULT, WPARAM},
-    UI::{
-        Input::KeyboardAndMouse::{
-            VK_CONTROL, VK_ESCAPE, VK_LCONTROL, VK_LMENU, VK_LWIN, VK_MENU, VK_RCONTROL, VK_RMENU,
-            VK_RWIN,
-        },
-        WindowsAndMessaging::{
-            CallNextHookEx, DispatchMessageW, GetMessageW, SetWindowsHookExW, TranslateMessage,
-            UnhookWindowsHookEx, HC_ACTION, KBDLLHOOKSTRUCT, MSG, WH_KEYBOARD_LL, WM_KEYDOWN,
-            WM_KEYUP, WM_SYSKEYDOWN, WM_SYSKEYUP,
-        },
+    UI::WindowsAndMessaging::{
+        CallNextHookEx, DispatchMessageW, GetMessageW, SetWindowsHookExW, TranslateMessage,
+        UnhookWindowsHookEx, HC_ACTION, KBDLLHOOKSTRUCT, MSG, WH_KEYBOARD_LL, WM_KEYDOWN, WM_KEYUP,
+        WM_SYSKEYDOWN, WM_SYSKEYUP,
     },
 };
 
+use super::binding::{ShortcutAction, ShortcutBindings};
+use super::keys::{key_to_vk, Modifier, VK_COUNT};
 use crate::errors::AppError;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ShortcutSignal {
-    PushToTalkPressed,
-    PushToTalkReleased,
-    HandsFreeToggle,
-    CommandModePressed,
-    CommandModeReleased,
-    Cancel,
+pub struct ShortcutSignal {
+    pub action: ShortcutAction,
+    /// `true` when the gesture became fully held, `false` when it was released.
+    /// Hold-style actions use both edges; toggle-style actions ignore release.
+    pub pressed: bool,
+}
+
+/// A binding reduced to the form the hook can evaluate on every keystroke.
+struct CompiledBinding {
+    action: ShortcutAction,
+    modifiers: Vec<Modifier>,
+    key: Option<u16>,
+    /// Whether the gesture was satisfied on the previous evaluation, so we can
+    /// emit transitions rather than a signal per key event.
+    active: AtomicBool,
 }
 
 struct HookContext {
     sender: UnboundedSender<ShortcutSignal>,
-    control_left: AtomicBool,
-    control_right: AtomicBool,
-    control_generic: AtomicBool,
-    windows_left: AtomicBool,
-    windows_right: AtomicBool,
-    space: AtomicBool,
-    alt_left: AtomicBool,
-    alt_right: AtomicBool,
-    alt_generic: AtomicBool,
-    combo_active: AtomicBool,
-    command_active: AtomicBool,
+    /// Physical key state indexed by virtual-key code.
+    keys: Vec<AtomicBool>,
+    bindings: RwLock<Vec<CompiledBinding>>,
 }
 
 static CONTEXT: OnceLock<HookContext> = OnceLock::new();
 
-pub fn start_modifier_hook() -> Result<UnboundedReceiver<ShortcutSignal>, AppError> {
+fn compile(bindings: &ShortcutBindings) -> Vec<CompiledBinding> {
+    bindings
+        .entries()
+        .into_iter()
+        .filter_map(|(action, binding)| {
+            let modifiers = binding
+                .modifiers
+                .iter()
+                .filter_map(|name| Modifier::parse(name))
+                .collect::<Vec<_>>();
+            let key = match binding.key.as_deref() {
+                Some(name) => match key_to_vk(name) {
+                    Some(vk) => Some(vk),
+                    // An unknown key name would silently match nothing, so drop
+                    // the binding and say so rather than appear to be bound.
+                    None => {
+                        log::warn!("ignoring shortcut with unrecognised key: {name}");
+                        return None;
+                    }
+                },
+                None => None,
+            };
+            if modifiers.is_empty() && key.is_none() {
+                return None;
+            }
+            Some(CompiledBinding {
+                action,
+                modifiers,
+                key,
+                active: AtomicBool::new(false),
+            })
+        })
+        .collect()
+}
+
+/// Replaces the live bindings. Called whenever settings are saved so rebinding
+/// takes effect without restarting the hook thread.
+pub fn update_bindings(bindings: &ShortcutBindings) {
+    let Some(context) = CONTEXT.get() else {
+        return;
+    };
+    match context.bindings.write() {
+        Ok(mut guard) => *guard = compile(bindings),
+        Err(_) => log::error!("shortcut binding table is poisoned; keeping previous bindings"),
+    }
+}
+
+pub fn start_modifier_hook(
+    bindings: &ShortcutBindings,
+) -> Result<UnboundedReceiver<ShortcutSignal>, AppError> {
     let (sender, receiver) = unbounded_channel();
     CONTEXT
         .set(HookContext {
             sender,
-            control_left: AtomicBool::new(false),
-            control_right: AtomicBool::new(false),
-            control_generic: AtomicBool::new(false),
-            windows_left: AtomicBool::new(false),
-            windows_right: AtomicBool::new(false),
-            space: AtomicBool::new(false),
-            alt_left: AtomicBool::new(false),
-            alt_right: AtomicBool::new(false),
-            alt_generic: AtomicBool::new(false),
-            combo_active: AtomicBool::new(false),
-            command_active: AtomicBool::new(false),
+            keys: (0..VK_COUNT).map(|_| AtomicBool::new(false)).collect(),
+            bindings: RwLock::new(compile(bindings)),
         })
-        .map_err(|_| {
-            AppError::Windows("push-to-talk keyboard hook was already initialized".into())
-        })?;
+        .map_err(|_| AppError::Windows("shortcut keyboard hook was already initialized".into()))?;
+
     let (init_sender, init_receiver) = std::sync::mpsc::sync_channel(1);
     std::thread::Builder::new()
         .name("voiceflow-shortcut-hook".into())
@@ -102,6 +137,7 @@ pub fn start_modifier_hook() -> Result<UnboundedReceiver<ShortcutSignal>, AppErr
             let _ = UnhookWindowsHookEx(hook);
         })
         .map_err(|error| AppError::Windows(error.to_string()))?;
+
     match init_receiver.recv_timeout(Duration::from_secs(2)) {
         Ok(Ok(())) => Ok(receiver),
         Ok(Err(error)) => Err(AppError::Windows(format!(
@@ -120,83 +156,129 @@ unsafe extern "system" fn keyboard_proc(code: i32, wparam: WPARAM, lparam: LPARA
         let up = wparam.0 == WM_KEYUP as usize || wparam.0 == WM_SYSKEYUP as usize;
         if down || up {
             if let Some(context) = CONTEXT.get() {
-                let key = event.vkCode as u16;
-                if key == VK_ESCAPE.0 && down {
-                    send_signal(context, ShortcutSignal::Cancel);
+                let vk = event.vkCode as usize;
+                if vk < context.keys.len() {
+                    context.keys[vk].store(down, Ordering::Relaxed);
                 }
-                if key == VK_CONTROL.0 {
-                    context.control_generic.store(down, Ordering::Relaxed);
-                } else if key == VK_LCONTROL.0 {
-                    context.control_left.store(down, Ordering::Relaxed);
-                } else if key == VK_RCONTROL.0 {
-                    context.control_right.store(down, Ordering::Relaxed);
-                }
-                if key == VK_LWIN.0 {
-                    context.windows_left.store(down, Ordering::Relaxed);
-                } else if key == VK_RWIN.0 {
-                    context.windows_right.store(down, Ordering::Relaxed);
-                }
-                if key == VK_MENU.0 {
-                    context.alt_generic.store(down, Ordering::Relaxed);
-                } else if key == VK_LMENU.0 {
-                    context.alt_left.store(down, Ordering::Relaxed);
-                } else if key == VK_RMENU.0 {
-                    context.alt_right.store(down, Ordering::Relaxed);
-                }
-                if key == windows::Win32::UI::Input::KeyboardAndMouse::VK_SPACE.0 {
-                    let was_space = context.space.swap(down, Ordering::Relaxed);
-                    if down && !was_space && control_down(context) && windows_down(context) {
-                        send_signal(context, ShortcutSignal::HandsFreeToggle);
-                    }
-                }
-                let control = control_down(context);
-                let windows = windows_down(context);
-                let alt = alt_down(context);
-                let command = control && windows && alt;
-                let was_command = context.command_active.swap(command, Ordering::Relaxed);
-                if command != was_command {
-                    let signal = if command {
-                        ShortcutSignal::CommandModePressed
-                    } else {
-                        ShortcutSignal::CommandModeReleased
-                    };
-                    send_signal(context, signal);
-                }
-                let active = control && windows;
-                let was_active = context.combo_active.swap(active, Ordering::Relaxed);
-                if active != was_active && !command && !was_command {
-                    let signal = if active {
-                        ShortcutSignal::PushToTalkPressed
-                    } else {
-                        ShortcutSignal::PushToTalkReleased
-                    };
-                    send_signal(context, signal);
-                }
+                evaluate(context);
             }
         }
     }
     CallNextHookEx(None, code, wparam, lparam)
 }
 
-fn control_down(context: &HookContext) -> bool {
-    context.control_left.load(Ordering::Relaxed)
-        || context.control_right.load(Ordering::Relaxed)
-        || context.control_generic.load(Ordering::Relaxed)
+/// Recomputes every binding and emits an edge whenever one changes state.
+fn evaluate(context: &HookContext) {
+    let Ok(bindings) = context.bindings.read() else {
+        return;
+    };
+
+    // A gesture with more keys wins: while Ctrl+Win+Space is held, Ctrl+Win is
+    // also satisfied, and only the more specific one should fire.
+    let best = bindings
+        .iter()
+        .filter(|binding| satisfied(context, binding))
+        .map(|binding| binding.modifiers.len() + usize::from(binding.key.is_some()))
+        .max();
+
+    // A more-specific shortcut can be used to promote an active hold shortcut.
+    // Queue press edges before release edges so Ctrl+Win+Space promotes a live
+    // Ctrl+Win push-to-talk session instead of first finalizing it.
+    let mut presses = Vec::new();
+    let mut releases = Vec::new();
+
+    for binding in bindings.iter() {
+        let specificity = binding.modifiers.len() + usize::from(binding.key.is_some());
+        let active = satisfied(context, binding) && Some(specificity) == best;
+        if binding.active.swap(active, Ordering::Relaxed) != active {
+            let signal = ShortcutSignal {
+                action: binding.action,
+                pressed: active,
+            };
+            if active {
+                presses.push((specificity, signal));
+            } else {
+                releases.push((specificity, signal));
+            }
+        }
+    }
+
+    // Most-specific presses go first. Releases only clean up a previous hold
+    // after the newly active action has had a chance to handle the gesture.
+    presses.sort_by(|left, right| right.0.cmp(&left.0));
+    for (_, signal) in presses.into_iter().chain(releases) {
+        log::debug!("shortcut signal queued: {signal:?}");
+        if context.sender.send(signal).is_err() {
+            log::error!("shortcut event dropped because the dispatcher stopped");
+        }
+    }
 }
 
-fn windows_down(context: &HookContext) -> bool {
-    context.windows_left.load(Ordering::Relaxed) || context.windows_right.load(Ordering::Relaxed)
+fn satisfied(context: &HookContext, binding: &CompiledBinding) -> bool {
+    let held = |vk: u16| {
+        context
+            .keys
+            .get(vk as usize)
+            .is_some_and(|state| state.load(Ordering::Relaxed))
+    };
+    binding
+        .modifiers
+        .iter()
+        .all(|modifier| modifier.virtual_keys().iter().copied().any(held))
+        && binding.key.map(held).unwrap_or(true)
 }
 
-fn alt_down(context: &HookContext) -> bool {
-    context.alt_left.load(Ordering::Relaxed)
-        || context.alt_right.load(Ordering::Relaxed)
-        || context.alt_generic.load(Ordering::Relaxed)
-}
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-fn send_signal(context: &HookContext, signal: ShortcutSignal) {
-    log::debug!("shortcut signal queued: {signal:?}");
-    if context.sender.send(signal).is_err() {
-        log::error!("shortcut event dropped because the dispatcher stopped");
+    fn context(bindings: &ShortcutBindings) -> (HookContext, UnboundedReceiver<ShortcutSignal>) {
+        let (sender, receiver) = unbounded_channel();
+        (
+            HookContext {
+                sender,
+                keys: (0..VK_COUNT).map(|_| AtomicBool::new(false)).collect(),
+                bindings: RwLock::new(compile(bindings)),
+            },
+            receiver,
+        )
+    }
+
+    fn set(context: &HookContext, vk: u16, held: bool) {
+        context.keys[vk as usize].store(held, Ordering::Relaxed);
+    }
+
+    #[test]
+    fn promotion_press_precedes_push_to_talk_release() {
+        let bindings = ShortcutBindings::default();
+        let (context, mut receiver) = context(&bindings);
+
+        set(&context, Modifier::Ctrl.virtual_keys()[0], true);
+        set(&context, Modifier::Win.virtual_keys()[0], true);
+        evaluate(&context);
+        assert_eq!(
+            receiver.try_recv().unwrap(),
+            ShortcutSignal {
+                action: ShortcutAction::PushToTalk,
+                pressed: true,
+            }
+        );
+
+        set(&context, key_to_vk("Space").unwrap(), true);
+        evaluate(&context);
+        assert_eq!(
+            receiver.try_recv().unwrap(),
+            ShortcutSignal {
+                action: ShortcutAction::HandsFree,
+                pressed: true,
+            }
+        );
+        assert_eq!(
+            receiver.try_recv().unwrap(),
+            ShortcutSignal {
+                action: ShortcutAction::PushToTalk,
+                pressed: false,
+            }
+        );
     }
 }

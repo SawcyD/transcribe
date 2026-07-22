@@ -1,41 +1,68 @@
-import type { CSSProperties } from "react";
+import { useEffect, useState, type CSSProperties } from "react";
 
-export function AudioVisualizer({ bars, processing = false }: { bars: number[]; processing?: boolean }) {
-  const source = bars.length > 0 ? bars : Array.from({ length: 12 }, () => 0.08);
-  const level = source.reduce((sum, value) => sum + value, 0) / source.length;
-  const barCount = 18;
-  const halfCount = barCount / 2;
-  const left = Array.from({ length: halfCount }, (_, index) => {
-    const sourceIndex = Math.min(source.length - 1, Math.floor((index / (halfCount - 1)) * (source.length - 1)));
+const BAR_COUNT = 24;
+
+/**
+ * Renders the level stream published by the Rust capture thread.
+ *
+ * The component owns no audio: it only maps the `bars` it is handed. When the
+ * user prefers reduced motion it collapses to a single static level bar rather
+ * than animating 24 independent elements.
+ */
+export function AudioVisualizer({ bars }: { bars: number[] }) {
+  const [reducedMotion, setReducedMotion] = useState(
+    () => window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false,
+  );
+
+  useEffect(() => {
+    const query = window.matchMedia?.("(prefers-reduced-motion: reduce)");
+    if (!query) return;
+    const onChange = (event: MediaQueryListEvent) => setReducedMotion(event.matches);
+    query.addEventListener("change", onChange);
+    return () => query.removeEventListener("change", onChange);
+  }, []);
+
+  const source = bars.length > 0 ? bars : [];
+  const level = source.length > 0 ? source.reduce((sum, value) => sum + value, 0) / source.length : 0;
+
+  if (reducedMotion) {
+    return (
+      <div
+        className="audio-wave audio-wave--static"
+        role="meter"
+        aria-label="Microphone input level"
+        aria-valuemin={0}
+        aria-valuemax={1}
+        aria-valuenow={Number(level.toFixed(2))}
+      >
+        <i style={{ width: `${Math.min(100, Math.round(level * 140))}%` }} />
+      </div>
+    );
+  }
+
+  const values = Array.from({ length: BAR_COUNT }, (_, index) => {
+    if (source.length === 0) return 0;
+    const sourceIndex = Math.min(
+      source.length - 1,
+      Math.round((index / (BAR_COUNT - 1)) * (source.length - 1)),
+    );
     return source[sourceIndex] ?? level;
   });
-  const values = [...left, ...left.slice().reverse()];
 
   return (
     <div
-      className={`audio-wave ${processing ? "audio-wave--processing" : ""}`}
-      aria-label="Microphone input level"
-      aria-valuemax={1}
-      aria-valuemin={0}
-      aria-valuenow={Number(level.toFixed(2))}
+      className="audio-wave"
       role="meter"
+      aria-label="Microphone input level"
+      aria-valuemin={0}
+      aria-valuemax={1}
+      aria-valuenow={Number(level.toFixed(2))}
     >
-      <span className="audio-wave-line" aria-hidden="true" />
       {values.map((value, index) => {
-        const scale = 0.1 + Math.max(0, Math.min(1, value)) * 1.1;
-        const opacity = 0.22 + value * 0.78;
-        const style = {
-          opacity,
-          "--wave-scale": scale.toFixed(3),
-          transitionDelay: `${index * 8}ms`,
-        } as CSSProperties;
-        return (
-          <i
-            className="audio-wave-bar"
-            key={index}
-            style={style}
-          />
-        );
+        // Silence renders as a flat baseline, never as invented motion.
+        const scale = 0.08 + Math.max(0, Math.min(1, value)) * 0.92;
+        const style = { "--wave-scale": scale.toFixed(3) } as CSSProperties;
+        return <i className="audio-wave-bar" key={index} style={style} />;
       })}
     </div>
   );

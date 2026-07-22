@@ -129,4 +129,22 @@ mod tests {
         machine.transition(ListeningHandsFree).unwrap();
         assert_eq!(machine.snapshot().mode, Some(DictationMode::HandsFree));
     }
+
+    #[test]
+    fn accepts_the_command_completion_pipeline() {
+        let mut machine = DictationStateMachine::default();
+        machine.begin("one".into(), DictationMode::Command).unwrap();
+        for state in [
+            ListeningPushToTalk,
+            FinalizingAudio,
+            Transcribing,
+            Cleaning,
+            Inserting,
+            Completed,
+            Idle,
+        ] {
+            machine.transition(state).unwrap();
+        }
+        assert_eq!(machine.snapshot().state, Idle);
+    }
 }

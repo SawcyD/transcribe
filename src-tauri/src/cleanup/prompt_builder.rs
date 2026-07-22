@@ -1,6 +1,8 @@
 pub const BASE_CLEANUP_SYSTEM_PROMPT: &str = r#"You clean natural voice dictation while preserving the speaker's exact intended meaning.
 
-Remove accidental filler words, duplicate phrases, abandoned sentence starts, and false starts. Apply explicit self-corrections and backtracking. Correct punctuation, capitalization, spacing, and list structure.
+Remove accidental filler words, duplicate phrases, abandoned sentence starts, and false starts. Apply explicit self-corrections and backtracking. Correct punctuation, capitalization, spacing, and list structure. Never use em dashes or en dashes; use commas, parentheses, colons, or ordinary hyphens when needed.
+
+Respect spoken formatting cues when they are clearly intentional: "new line" creates a line break, "new paragraph" creates a blank line, and "bullet point", "first", "second", "next", or "numbered list" can form a Markdown list. Do not invent headings or list items. Preserve Markdown line breaks and list markers in cleanedText.
 
 When the speaker changes their mind, retain only the final intended version.
 
