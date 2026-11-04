@@ -4,7 +4,8 @@ use windows::Win32::{
     UI::{
         Input::KeyboardAndMouse::SetFocus,
         WindowsAndMessaging::{
-            BringWindowToTop, GetWindowThreadProcessId, IsWindow, SetForegroundWindow,
+            BringWindowToTop, GetForegroundWindow, GetWindowThreadProcessId, IsIconic,
+            IsWindow, SetForegroundWindow, ShowWindow, SW_RESTORE,
         },
     },
 };
@@ -27,8 +28,24 @@ pub fn restore(target: &ActiveTarget) -> Result<(), AppError> {
         let current_thread = GetCurrentThreadId();
         let attached = current_thread != target_thread
             && AttachThreadInput(current_thread, target_thread, true).as_bool();
-        let _ = BringWindowToTop(window);
-        if !SetForegroundWindow(window).as_bool() {
+        if IsIconic(window).as_bool() {
+            let _ = ShowWindow(window, SW_RESTORE);
+        }
+        // SetForegroundWindow's return value is unreliable: it can report
+        // failure while the window is (or becomes) foreground anyway, which used
+        // to surface as a false "could not paste". Judge by the actual result
+        // and give the foreground lock a couple of short retries.
+        let mut focused = GetForegroundWindow() == window;
+        for _ in 0..3 {
+            if focused {
+                break;
+            }
+            let _ = BringWindowToTop(window);
+            let _ = SetForegroundWindow(window);
+            std::thread::sleep(std::time::Duration::from_millis(15));
+            focused = GetForegroundWindow() == window;
+        }
+        if !focused {
             if attached {
                 let _ = AttachThreadInput(current_thread, target_thread, false);
             }

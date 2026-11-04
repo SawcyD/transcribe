@@ -190,6 +190,8 @@ fn handle_message(
                                 if !transcript.is_empty() {
                                     accumulator.final_segments.push(transcript);
                                 }
+                                let _ = event_sender
+                                    .send(ProviderEvent::Interim(accumulator.running_text(None)));
                                 accumulator
                                     .words
                                     .extend(alternative.words.into_iter().map(Into::into));
@@ -204,8 +206,12 @@ fn handle_message(
                                         + response.duration.unwrap_or(0.0),
                                 );
                             } else if !transcript.is_empty() {
-                                accumulator.interim_segments.push(transcript.clone());
-                                let _ = event_sender.send(ProviderEvent::Interim(transcript));
+                                let running = accumulator.running_text(Some(&transcript));
+                                accumulator.interim_segments.push(transcript);
+                                // Stream the whole utterance so far (finalized
+                                // segments + the live tail), not just the
+                                // current segment, so the preview never "forgets".
+                                let _ = event_sender.send(ProviderEvent::Interim(running));
                             }
                         }
                     }
@@ -238,6 +244,17 @@ struct Accumulator {
 }
 
 impl Accumulator {
+    fn running_text(&self, tail: Option<&str>) -> String {
+        let mut text = self.final_segments.join(" ");
+        if let Some(tail) = tail.filter(|value| !value.is_empty()) {
+            if !text.is_empty() {
+                text.push(' ');
+            }
+            text.push_str(tail);
+        }
+        text
+    }
+
     fn finish(self, latency: Duration) -> TranscriptionResult {
         let confidence = if self.confidences.is_empty() {
             None

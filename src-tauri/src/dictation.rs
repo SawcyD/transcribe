@@ -79,7 +79,7 @@ pub async fn start(
     let config = TranscriptionConfig {
         language: settings.language.clone(),
         model: settings.transcription_model.clone(),
-        sample_rate: capture.format.sample_rate,
+        sample_rate: capture.stream_sample_rate,
         encoding: "linear16".into(),
         interim_results: true,
         punctuation: true,
@@ -247,9 +247,20 @@ pub async fn finish(app: &AppHandle, state: &AppState) -> Result<DictationSnapsh
     }
     emit_snapshot(app, state).await;
     let settings = state.settings.read().await.clone();
-    let entries = state.database.enabled_dictionary_entries()?;
+    // Dictionary problems degrade to "no dictionary" rather than stranding the
+    // session in Cleaning with a spinner that never goes away.
+    let entries = state
+        .database
+        .enabled_dictionary_entries()
+        .unwrap_or_else(|error| {
+            log::warn!(
+                "dictionary unavailable; category={}",
+                error.payload().category
+            );
+            Vec::new()
+        });
     let raw = transcription.raw_text.trim().to_string();
-    let normalized = apply_dictionary(&raw, &entries)?;
+    let normalized = apply_dictionary(&raw, &entries).unwrap_or_else(|_| raw.clone());
     let structured = if settings.spoken_formatting_enabled {
         normalize_spoken_structure(&normalized)
     } else {
@@ -301,22 +312,31 @@ pub async fn finish(app: &AppHandle, state: &AppState) -> Result<DictationSnapsh
             sanitize_transcription_formatting(&voice_action.text)
         }
     };
-    let mut final_text =
-        sanitize_transcription_formatting(&apply_dictionary(&finish_sentence(&cleaned), &entries)?);
+    let finished = finish_sentence(&cleaned);
+    let mut final_text = sanitize_transcription_formatting(
+        &apply_dictionary(&finished, &entries).unwrap_or(finished.clone()),
+    );
     let transform_id = settings
         .auto_apply_transform
         .clone()
         .filter(|value| !value.trim().is_empty());
     if let Some(transform_id) = transform_id.as_deref() {
-        let transformed = transforms::apply_transform(
+        match transforms::apply_transform(
             TransformRequest {
                 text: final_text.clone(),
                 transform_id: transform_id.into(),
             },
             &settings,
         )
-        .await?;
-        final_text = transformed.transformed_text;
+        .await
+        {
+            Ok(transformed) => final_text = transformed.transformed_text,
+            // Insert the cleaned dictation rather than losing it to a transform.
+            Err(error) => log::warn!(
+                "auto-transform skipped; category={}",
+                error.payload().category
+            ),
+        }
     }
     final_text = sanitize_transcription_formatting(&final_text);
     if active.mode == DictationMode::Call {
@@ -411,6 +431,7 @@ pub async fn finish(app: &AppHandle, state: &AppState) -> Result<DictationSnapsh
     }
 
     // Captured before the record is consumed by the save path below.
+    let record_final_text = record.final_transcript.clone();
     let inserted_word_count = record.final_transcript.split_whitespace().count();
     let inserted_application = record
         .application_name
@@ -431,9 +452,12 @@ pub async fn finish(app: &AppHandle, state: &AppState) -> Result<DictationSnapsh
             record.cleaned_transcript.clear();
         }
         if let Err(error) = state.database.insert_transcript(&record) {
-            retain_failed_audio(state, &active.id, captured).await;
-            set_error(app, state, error.payload()).await;
-            return Err(error);
+            // The text has already been delivered; a History write failure
+            // must not be reported to the user as a failed paste.
+            log::warn!(
+                "history save failed after insertion; category={}",
+                error.payload().category
+            );
         }
         if let Err(error) = state
             .database
@@ -470,6 +494,8 @@ pub async fn finish(app: &AppHandle, state: &AppState) -> Result<DictationSnapsh
     {
         let mut runtime = state.dictation.lock().await;
         runtime.recovery_audio = None;
+        // The dock's success state shows what was actually delivered.
+        runtime.machine.set_interim(record_final_text);
         runtime.machine.transition(DictationState::Completed)?;
     }
     emit_snapshot(app, state).await;
@@ -663,9 +689,47 @@ async fn run_cleanup(
     }
 }
 
+/// How long an error stays on the dock before the app returns to Idle.
+const ERROR_DISMISS_MS: u64 = 4_500;
+
 async fn set_error(app: &AppHandle, state: &AppState, error: AppErrorPayload) {
-    state.dictation.lock().await.machine.fail(error);
+    let session_id = {
+        let mut runtime = state.dictation.lock().await;
+        runtime.machine.fail(error);
+        runtime.machine.snapshot().session_id
+    };
     emit_snapshot(app, state).await;
+    schedule_error_dismiss(app.clone(), session_id);
+}
+
+/// Errors used to be sticky: the hotkey only starts from Idle, so after any
+/// failure the next Ctrl+Win silently did nothing until Escape was pressed.
+/// Clear the error automatically once the user has had time to read it.
+fn schedule_error_dismiss(app: AppHandle, session_id: Option<String>) {
+    tauri::async_runtime::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_millis(ERROR_DISMISS_MS)).await;
+        let state = app.state::<AppState>();
+        let dismissed = {
+            let mut runtime = state.dictation.lock().await;
+            let snapshot = runtime.machine.snapshot();
+            if snapshot.state == DictationState::Error && snapshot.session_id == session_id {
+                if let Some(mut active) = runtime.active.take() {
+                    active.transcription.abort();
+                    if let Some(capture) = active.capture.take() {
+                        drop(capture.stop());
+                    }
+                }
+                runtime.machine.reset();
+                true
+            } else {
+                false
+            }
+        };
+        if dismissed {
+            hide_overlay(&app);
+            emit_snapshot(&app, &state).await;
+        }
+    });
 }
 
 async fn retain_failed_audio(state: &AppState, session_id: &str, audio: CapturedAudio) {
@@ -698,8 +762,8 @@ async fn emit_snapshot(app: &AppHandle, state: &AppState) {
     let _ = app.emit("dictation-state", snapshot);
 }
 
-const OVERLAY_WIDTH: u32 = 260;
-const OVERLAY_HEIGHT: u32 = 44;
+const OVERLAY_WIDTH: u32 = 360;
+const OVERLAY_HEIGHT: u32 = 48;
 const OVERLAY_MARGIN: u32 = 56;
 
 fn show_overlay(app: &AppHandle, settings: &crate::models::AppSettings) -> Result<(), AppError> {
@@ -809,15 +873,21 @@ fn sanitize_transcription_formatting(input: &str) -> String {
 }
 
 fn normalize_spoken_structure(input: &str) -> String {
+    use std::sync::OnceLock;
+    static CUES: OnceLock<[(regex::Regex, &'static str); 3]> = OnceLock::new();
+    let cues = CUES.get_or_init(|| {
+        // Whole words only, any case: "bulletin" and "Newline-delimited" are
+        // ordinary words, not formatting commands.
+        let cue = |pattern: &str| regex::Regex::new(&format!(r"(?i)\b(?:{pattern})\b")).unwrap();
+        [
+            (cue("new paragraph|next paragraph"), "\n\n"),
+            (cue("new line|next line"), "\n"),
+            (cue("bullet point|bullet|next point"), "\n- "),
+        ]
+    });
     let mut value = input.to_string();
-    for cue in ["new paragraph", "next paragraph"] {
-        value = value.replace(cue, "\n\n");
-    }
-    for cue in ["new line", "next line"] {
-        value = value.replace(cue, "\n");
-    }
-    for cue in ["bullet point", "bullet", "next point"] {
-        value = value.replace(cue, "\n- ");
+    for (pattern, replacement) in cues {
+        value = pattern.replace_all(&value, *replacement).into_owned();
     }
     value
 }
@@ -895,6 +965,10 @@ mod tests {
         assert_eq!(
             normalize_spoken_structure("first bullet point add tests"),
             "first \n-  add tests"
+        );
+        assert_eq!(
+            normalize_spoken_structure("Read the bulletin. New Line done"),
+            "Read the bulletin. \n done"
         );
     }
 

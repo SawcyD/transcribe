@@ -87,6 +87,15 @@ pub fn run() {
                     log::debug!("shortcut dispatcher received: {signal:?}");
                     let app = handle.clone();
                     let state = app.state::<AppState>();
+                    // A dictation hotkey while an error is still on the dock
+                    // dismisses it and starts fresh instead of being ignored.
+                    if signal.pressed
+                        && signal.action != ShortcutAction::Cancel
+                        && state.dictation.lock().await.machine.snapshot().state
+                            == DictationState::Error
+                    {
+                        let _ = dictation::cancel(&app, &state).await;
+                    }
                     match (signal.action, signal.pressed) {
                         (ShortcutAction::PushToTalk, true) => {
                             let current = state.dictation.lock().await.machine.snapshot().state;
