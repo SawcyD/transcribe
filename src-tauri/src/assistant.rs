@@ -19,6 +19,9 @@ pub struct AssistantRequest {
     pub screen_context: Option<ScreenContext>,
     #[serde(default)]
     pub history: Vec<AssistantConversationTurn>,
+    /// When set (and saving is on), the turn is saved into this chat.
+    #[serde(default)]
+    pub chat_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -104,9 +107,44 @@ pub async fn start(
     }
 
     let settings = state.settings.read().await.clone();
-    let api_key = tokio::task::spawn_blocking(|| security::get(CredentialKind::Cleanup))
+    // The assistant has its own provider settings; it used to silently use
+    // the cleanup provider's endpoint, model and key instead. Its own key is
+    // preferred, falling back to the cleanup key for existing setups.
+    let (api_key, endpoint, model) = match tokio::task::spawn_blocking(|| security::get(CredentialKind::Assistant))
         .await
-        .map_err(|error| AppError::Credential(error.to_string()))??;
+        .map_err(|error| AppError::Credential(error.to_string()))?
+    {
+        Ok(key) => (key, settings.assistant_endpoint.clone(), settings.assistant_model.clone()),
+        // No separate assistant key: keep using the cleanup provider as a
+        // whole (endpoint + model + key), exactly as before.
+        Err(_) => (
+            tokio::task::spawn_blocking(|| security::get(CredentialKind::Cleanup))
+                .await
+                .map_err(|error| AppError::Credential(error.to_string()))??,
+            settings.cleanup_endpoint.clone(),
+            settings.cleanup_model.clone(),
+        ),
+    };
+    let remember = settings.assistant_remember_chats;
+    let memory = if remember {
+        state
+            .database
+            .recall_assistant_turns(&request.prompt, request.chat_id.as_deref(), 3)
+            .map(|recalled| crate::assistant_memory::prompt_section(&recalled))
+            .unwrap_or_else(|error| {
+                log::debug!("assistant memory unavailable: {error}");
+                None
+            })
+    } else {
+        None
+    };
+    let database = state.database.clone();
+    let save_to = request.chat_id.clone().filter(|_| remember);
+    let question = request.prompt.trim().to_string();
+    let application = request
+        .screen_context
+        .as_ref()
+        .and_then(|context| context.application.clone());
     let request_id = Uuid::new_v4().to_string();
     state.assistant.lock().await.active_request_id = Some(request_id.clone());
 
@@ -124,14 +162,24 @@ pub async fn start(
         let result = stream_response(
             &app,
             &event_request_id,
-            settings.cleanup_endpoint,
-            settings.cleanup_model,
+            endpoint,
+            model,
             api_key,
             request,
+            memory,
         )
         .await;
         let (state, message) = match result {
-            Ok(()) => ("completed", None),
+            Ok(answer) => {
+                if let Some(chat_id) = save_to.as_deref() {
+                    if let Err(error) =
+                        database.append_assistant_turn(chat_id, application.as_deref(), &question, &answer)
+                    {
+                        log::warn!("assistant chat was not saved: {error}");
+                    }
+                }
+                ("completed", None)
+            }
             Err(error) => ("error", Some(error.to_string())),
         };
         let _ = app.emit(
@@ -251,7 +299,8 @@ async fn stream_response(
     model: String,
     api_key: String,
     request: AssistantRequest,
-) -> Result<(), AppError> {
+    memory: Option<String>,
+) -> Result<String, AppError> {
     let mut user_content = vec![serde_json::json!({ "type": "text", "text": request.prompt })];
     if let Some(context) = request.screen_context {
         let target = [context.application, context.window_title]
@@ -269,9 +318,13 @@ async fn stream_response(
             "image_url": { "url": context.screenshot_data_url, "detail": "low" }
         }));
     }
+    let system = match memory {
+        Some(memory) => format!("{SYSTEM_PROMPT}\n\n{memory}"),
+        None => SYSTEM_PROMPT.to_string(),
+    };
     let mut messages = vec![ChatMessage {
         role: "system".into(),
-        content: serde_json::Value::String(SYSTEM_PROMPT.into()),
+        content: serde_json::Value::String(system),
     }];
     messages.extend(request.history.into_iter().map(|turn| ChatMessage {
         role: turn.role,
@@ -340,11 +393,12 @@ async fn stream_response(
             "assistant-delta",
             AssistantDeltaEvent {
                 request_id: request_id.to_string(),
-                delta: content,
+                delta: content.clone(),
             },
         );
-        return Ok(());
+        return Ok(content);
     }
+    let mut answer = String::new();
     let mut buffer = String::new();
     let mut stream = response.bytes_stream();
     while let Some(chunk) = stream.next().await {
@@ -357,13 +411,14 @@ async fn stream_response(
             buffer.drain(..=index);
             if let Some(data) = line.strip_prefix("data: ") {
                 if data == "[DONE]" {
-                    return Ok(());
+                    return Ok(answer);
                 }
                 if let Ok(value) = serde_json::from_str::<serde_json::Value>(data) {
                     if let Some(delta) = value
                         .pointer("/choices/0/delta/content")
                         .and_then(|value| value.as_str())
                     {
+                        answer.push_str(delta);
                         let _ = app.emit(
                             "assistant-delta",
                             AssistantDeltaEvent {
@@ -376,5 +431,5 @@ async fn stream_response(
             }
         }
     }
-    Ok(())
+    Ok(answer)
 }

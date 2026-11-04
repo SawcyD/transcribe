@@ -134,6 +134,8 @@ export interface AppSettings {
   cleanupMinWords: number;
   /** Keep a Deepgram connection open between dictations for a faster start. */
   keepTranscriptionWarm: boolean;
+  /** Save assistant chats and let the assistant recall them later. */
+  assistantRememberChats: boolean;
   backtrackingEnabled: boolean;
   spokenFormattingEnabled: boolean;
   voiceActionsEnabled: boolean;
@@ -195,6 +197,22 @@ export interface CredentialStatus {
 export interface AssistantStateEvent { requestId: string; state: "thinking" | "streaming" | "completed" | "error"; message?: string; }
 export interface AssistantDeltaEvent { requestId: string; delta: string; }
 export interface AssistantConversationTurn { role: "user" | "assistant"; content: string; }
+
+export interface AssistantChatSummary {
+  id: string;
+  title: string;
+  applicationName: string | null;
+  createdAt: string;
+  updatedAt: string;
+  turnCount: number;
+  preview: string;
+}
+
+export interface AssistantChatTurn {
+  question: string;
+  answer: string;
+  createdAt: string;
+}
 
 export interface DashboardStats {
   dailyWords: number;

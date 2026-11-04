@@ -87,6 +87,26 @@ pub async fn speak_text(state: State<'_, AppState>, text: String) -> Result<Stri
 }
 
 #[tauri::command]
+pub fn list_assistant_chats(
+    state: State<'_, AppState>,
+) -> Result<Vec<crate::database::AssistantChatSummary>, AppError> {
+    state.database.list_assistant_chats()
+}
+
+#[tauri::command]
+pub fn get_assistant_chat(
+    state: State<'_, AppState>,
+    id: String,
+) -> Result<Vec<crate::database::AssistantChatTurn>, AppError> {
+    state.database.get_assistant_chat(&id)
+}
+
+#[tauri::command]
+pub fn delete_assistant_chat(state: State<'_, AppState>, id: String) -> Result<(), AppError> {
+    state.database.delete_assistant_chat(&id)
+}
+
+#[tauri::command]
 pub fn list_dictionary_entries(
     state: State<'_, AppState>,
 ) -> Result<Vec<DictionaryEntry>, AppError> {

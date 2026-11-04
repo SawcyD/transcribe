@@ -36,6 +36,8 @@ export function AssistantDrawer() {
   const conversation = useRef<AssistantConversationTurn[]>([]);
   const completedRequest = useRef<string | null>(null);
   const speakResponsesRef = useRef(false);
+  // Each bubble conversation is saved as one chat (when remembering is on).
+  const chatId = useRef<string>(crypto.randomUUID());
 
   const reset = (nextContext: ScreenContext | null) => {
     stopSpeaking();
@@ -44,6 +46,7 @@ export function AssistantDrawer() {
     setAnswer("");
     answerRef.current = "";
     conversation.current = [];
+    chatId.current = crypto.randomUUID();
     setError("");
     setReplying(false);
     setReply("");
@@ -60,7 +63,7 @@ export function AssistantDrawer() {
     setReplying(false);
     conversation.current = [...history, { role: "user" as const, content: message }].slice(-12);
     try {
-      requestId.current = await native.askAssistant(message, attach, history);
+      requestId.current = await native.askAssistant(message, attach, history, chatId.current);
     } catch (reason) {
       setStatus("error");
       setError(nativeErrorMessage(reason));

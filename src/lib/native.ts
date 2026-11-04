@@ -15,6 +15,8 @@ import type {
   AssistantDeltaEvent,
   AssistantStateEvent,
   AssistantConversationTurn,
+  AssistantChatSummary,
+  AssistantChatTurn,
 } from "../types/models";
 
 export const isTauri = (): boolean => "__TAURI_INTERNALS__" in window;
@@ -65,6 +67,7 @@ export const defaultSettings: AppSettings = {
   removeFalseStarts: true,
   cleanupMinWords: 8,
   keepTranscriptionWarm: true,
+  assistantRememberChats: true,
   backtrackingEnabled: true,
   spokenFormattingEnabled: true,
   voiceActionsEnabled: true,
@@ -172,7 +175,12 @@ export const native = {
   openAssistantDrawer: (screenContext: ScreenContext) => call<void>("open_assistant_drawer", { screenContext }),
   pendingAssistantContext: () => call<ScreenContext | null>("get_pending_assistant_context", undefined, null),
   pendingAssistantVoicePrompt: () => call<string | null>("get_pending_assistant_voice_prompt", undefined, null),
-  askAssistant: (prompt: string, screenContext: ScreenContext | null, history: AssistantConversationTurn[] = []) => call<string>("ask_assistant", { request: { prompt, screenContext, history } }),
+  /** Starts a streamed answer; resolves to the request id (not the answer). */
+  askAssistant: (prompt: string, screenContext: ScreenContext | null, history: AssistantConversationTurn[] = [], chatId: string | null = null) =>
+    call<string>("ask_assistant", { request: { prompt, screenContext, history, chatId } }),
+  assistantChats: () => call<AssistantChatSummary[]>("list_assistant_chats", undefined, []),
+  assistantChat: (id: string) => call<AssistantChatTurn[]>("get_assistant_chat", { id }, []),
+  deleteAssistantChat: (id: string) => call<void>("delete_assistant_chat", { id }),
 };
 
 export const events = {

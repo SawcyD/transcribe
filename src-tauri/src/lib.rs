@@ -1,5 +1,6 @@
 mod app_state;
 mod assistant;
+mod assistant_memory;
 mod audio;
 mod brand;
 mod cleanup;
@@ -246,6 +247,9 @@ pub fn run() {
             commands::delete_transcript,
             commands::set_transcript_favorite,
             commands::speak_text,
+            commands::list_assistant_chats,
+            commands::get_assistant_chat,
+            commands::delete_assistant_chat,
             commands::list_dictionary_entries,
             commands::dashboard_stats,
             commands::get_settings,

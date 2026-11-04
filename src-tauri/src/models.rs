@@ -206,6 +206,8 @@ pub struct AppSettings {
     /// Keep a Deepgram connection open between dictations so the next one
     /// starts without a handshake. Idle connections close after 5 minutes.
     pub keep_transcription_warm: bool,
+    /// Save assistant conversations and let the assistant recall them later.
+    pub assistant_remember_chats: bool,
     pub auto_apply_transform: Option<String>,
     pub paste_delay_ms: u64,
     pub restore_clipboard: bool,
@@ -276,6 +278,7 @@ impl Default for AppSettings {
             cleanup_style: "balanced".into(),
             cleanup_min_words: 8,
             keep_transcription_warm: true,
+            assistant_remember_chats: true,
             auto_apply_transform: None,
             paste_delay_ms: 140,
             restore_clipboard: true,
