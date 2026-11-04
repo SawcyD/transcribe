@@ -1,4 +1,4 @@
-import { Plus, Trash2 } from "lucide-react";
+import { AudioLines, Eye, Hand, Headphones, Mic, Plus, Trash2 } from "lucide-react";
 import { useAutoSave } from "../app/useAutoSave";
 import { SaveIndicator } from "../components/common/SaveIndicator";
 import { useEffect, useMemo, useState } from "react";
@@ -9,6 +9,7 @@ import { SettingsRow, SettingsSection } from "../components/fluent/SettingsRow";
 import { ShortcutRecorder } from "../components/fluent/ShortcutRecorder";
 import { ToggleSwitch } from "../components/fluent/ToggleSwitch";
 import { defaultSettings, events, native } from "../lib/native";
+import { bindingKeys } from "../lib/shortcutKeys";
 import type {
   AppSettings,
   CleanupStyle,
@@ -17,28 +18,27 @@ import type {
 } from "../types/models";
 import { validateSettings } from "./settingsValidation";
 
-const MODES: Array<{ id: DictationMode; label: string; explanation: string }> = [
-  {
-    id: "push_to_talk",
-    label: "Push to talk",
-    explanation: "Hold the shortcut while speaking. Release the keys to process and insert the transcript.",
-  },
-  {
-    id: "hands_free",
-    label: "Hands-free",
-    explanation: "Press the shortcut to start. Press it again to finish.",
-  },
-  {
-    id: "command",
-    label: "Command Mode",
-    explanation: "Speak a request to the assistant. The result is returned in the Assistant panel.",
-  },
-  {
-    id: "call",
-    label: "Call Mode",
-    explanation:
-      "Records from Stereo Mix or a virtual audio cable. Results are formatted as call notes and copied to the clipboard.",
-  },
+/** Modes the Home "Start dictation" button and the tray can start. */
+const MODES: Array<{ id: DictationMode; label: string }> = [
+  { id: "push_to_talk", label: "Dictate" },
+  { id: "hands_free", label: "Dictate hands-free" },
+  { id: "call", label: "Call notes" },
+];
+
+const MODE_CARDS: Array<{
+  title: string;
+  icon: typeof Mic;
+  shortcut?: ShortcutActionId;
+  startHint?: string;
+  how: string;
+  result: string;
+  assistant?: boolean;
+}> = [
+  { title: "Dictate", icon: Mic, shortcut: "pushToTalk", how: "Hold the keys, speak, let go.", result: "Typed where your cursor is" },
+  { title: "Dictate hands-free", icon: Hand, shortcut: "handsFree", how: "Press once, talk as long as you like, press again (or say “finish dictation”).", result: "Typed where your cursor is" },
+  { title: "Ask about your screen", icon: Eye, shortcut: "commandMode", how: "Hold and ask a question. It looks at the window you're in.", result: "Answer pops up above the dock", assistant: true },
+  { title: "Talk to the assistant", icon: AudioLines, shortcut: "voiceAgent", how: "Press to start a spoken back-and-forth; press again to end.", result: "It talks back; saved in Assistant", assistant: true },
+  { title: "Call notes", icon: Headphones, startHint: "Start from Home or the tray", how: "Records your computer's audio (Stereo Mix or a virtual cable).", result: "Notes copied to the clipboard" },
 ];
 
 const STYLES: Array<{ id: CleanupStyle; label: string; description: string }> = [
@@ -53,12 +53,12 @@ const SHORTCUT_LABELS: Array<{ id: ShortcutActionId; label: string; description:
   { id: "handsFree", label: "Hands-free dictation", description: "Press to start, press again to finish." },
   { id: "commandMode", label: "Command Mode", description: "Speak a request to the assistant." },
   { id: "cancel", label: "Cancel", description: "Discard the active dictation." },
+  { id: "voiceAgent", label: "Voice agent", description: "Start a spoken conversation with the assistant; press again to end it." },
 ];
 
 export function DictationPage() {
   const [settings, setSettings] = useState<AppSettings>(defaultSettings);
   const [microphones, setMicrophones] = useState<string[]>([]);
-  const [mode, setMode] = useState<DictationMode>("push_to_talk");
   const [level, setLevel] = useState(0);
   const [testing, setTesting] = useState(false);
   const [loaded, setLoaded] = useState(false);
@@ -70,7 +70,6 @@ export function DictationPage() {
   useEffect(() => {
     void Promise.all([native.settings(), native.microphones()]).then(([stored, devices]) => {
       setSettings(stored);
-      setMode(stored.defaultMode);
       setMicrophones(devices);
       setLoaded(true);
     });
@@ -99,7 +98,6 @@ export function DictationPage() {
   });
 
   const stereoMixAvailable = microphones.some((name) => /stereo mix|virtual|cable|loopback/i.test(name));
-  const activeMode = MODES.find((entry) => entry.id === mode) ?? MODES[0];
 
   return (
     <div className="page">
@@ -112,25 +110,35 @@ export function DictationPage() {
 
       {!valid && <InfoBar severity="error" title="Some settings are invalid" message={Object.values(errors)[0]} />}
 
-      <SettingsSection title="Mode">
-        <div className="segmented" role="tablist" aria-label="Dictation mode">
-          {MODES.map((entry) => (
-            <button
-              key={entry.id}
-              type="button"
-              role="tab"
-              aria-selected={mode === entry.id}
-              className={`segmented__item${mode === entry.id ? " segmented__item--selected" : ""}`}
-              onClick={() => setMode(entry.id)}
-            >
-              {entry.label}
-            </button>
-          ))}
+      <SettingsSection title="How VoiceFlow listens" description="Five ways to use your voice. Change any shortcut below.">
+        <div className="mode-cards">
+          {MODE_CARDS.map((card) => {
+            const Icon = card.icon;
+            const keys = card.shortcut ? bindingKeys(settings.shortcuts[card.shortcut]) : [];
+            return (
+              <div key={card.title} className={`mode-card${card.assistant ? " mode-card--assistant" : ""}`}>
+                <span className="mode-card__icon" aria-hidden="true">
+                  <Icon size={16} />
+                </span>
+                <div className="mode-card__body">
+                  <span className="mode-card__title">
+                    <strong>{card.title}</strong>
+                    {keys.length > 0 ? (
+                      <span className="shortcut-chip">{keys.map((key) => <kbd key={key}>{key}</kbd>)}</span>
+                    ) : (
+                      <small className="mode-card__start">{card.startHint}</small>
+                    )}
+                  </span>
+                  <span className="mode-card__how">{card.how}</span>
+                  <span className="mode-card__result">→ {card.result}</span>
+                </div>
+              </div>
+            );
+          })}
         </div>
-        <p className="settings-group__description mode-explanation">{activeMode.explanation}</p>
         <SettingsRow
           label="Default mode"
-          description="Used by the Home page and tray when you start dictation without a shortcut."
+          description="What the Home page's Start button and the tray icon do."
           action={
             <ComboBox label="Default mode" value={settings.defaultMode} onChange={(value) => update("defaultMode", value)} options={MODES.map((entry) => ({ value: entry.id, label: entry.label }))} />
           }

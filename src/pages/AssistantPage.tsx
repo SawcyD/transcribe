@@ -1,4 +1,4 @@
-import { History, MessageSquarePlus, Monitor, Send, Trash2, X } from "lucide-react";
+import { AudioLines, History, MessageSquarePlus, Monitor, Send, Trash2, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "../components/common/Button";
 import { ContentDialog } from "../components/fluent/ContentDialog";
@@ -192,9 +192,14 @@ export function AssistantPage() {
             Saved chats{chats.length > 0 ? ` · ${chats.length}` : ""}
           </button>
         </div>
-        <button type="button" className="text-button" onClick={newChat}>
-          <MessageSquarePlus size={14} aria-hidden="true" /> New chat
-        </button>
+        <span className="assistant-tabs__actions">
+          <button type="button" className="text-button" onClick={newChat}>
+            <MessageSquarePlus size={14} aria-hidden="true" /> New chat
+          </button>
+          <Button variant="primary" icon={<AudioLines size={15} />} onClick={() => void native.startVoiceAgent()} title="Spoken back-and-forth conversation · Ctrl+Alt+V">
+            Talk out loud
+          </Button>
+        </span>
       </div>
 
       {tab === "chat" ? (
@@ -302,6 +307,11 @@ export function AssistantPage() {
           label="Allow screen context"
           description="When off, the assistant can never capture your screen, including from Command Mode."
           action={<ToggleSwitch label="Allow screen context" checked={settings.assistantAllowScreenContext} onChange={(value) => void update("assistantAllowScreenContext", value)} />}
+        />
+        <SettingsRow
+          label="Let me interrupt the voice agent"
+          description="Talk over it to cut it off. Use headphones: on speakers it would hear itself and reply to its own voice."
+          action={<ToggleSwitch label="Let me interrupt the voice agent" checked={settings.voiceAgentInterruptible} onChange={(value) => void update("voiceAgentInterruptible", value)} />}
         />
         <SettingsRow
           label="Read answers aloud"

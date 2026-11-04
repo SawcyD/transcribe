@@ -1,4 +1,4 @@
-import { Headphones, MessageSquare, Mic, Play } from "lucide-react";
+import { AudioLines, Headphones, MessageSquare, Mic, Play } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { InfoRow, ProgressBar, SectionHeader } from "@memora/ui";
@@ -7,15 +7,19 @@ import { Button } from "../components/common/Button";
 import { InfoBar } from "../components/fluent/InfoBar";
 import { StatusIndicator } from "../components/fluent/StatusIndicator";
 import { native } from "../lib/native";
+import { bindingKeys } from "../lib/shortcutKeys";
 import { computeHomeStats, formatMinutes, TYPING_WPM, type HomeStats } from "./homeStats";
-import type { AppSettings, CredentialStatus, DictationSnapshot, TranscriptRecord } from "../types/models";
+import type { AppSettings, CredentialStatus, DictationSnapshot, ShortcutActionId, TranscriptRecord } from "../types/models";
 
-const SHORTCUTS = [
-  { keys: ["Ctrl", "Win"], label: "Push to talk", description: "Hold while speaking, release to insert." },
-  { keys: ["Ctrl", "Win", "Space"], label: "Hands-free dictation", description: "Press to start, press again to finish." },
-  { keys: ["Ctrl", "Alt", "B"], label: "Command Mode", description: "Speak a request to the assistant." },
-  { keys: ["Esc"], label: "Cancel", description: "Discard the active dictation." },
+/** What each shortcut does, in plain words. Keys come from your settings. */
+const SHORTCUTS: Array<{ id: ShortcutActionId; label: string; description: string }> = [
+  { id: "pushToTalk", label: "Dictate", description: "Hold and speak; let go to type it where your cursor is." },
+  { id: "handsFree", label: "Dictate hands-free", description: "Press to start talking, press again to type it." },
+  { id: "commandMode", label: "Ask about your screen", description: "Hold and ask a question; the answer pops up above the dock." },
+  { id: "voiceAgent", label: "Talk to the assistant", description: "Press for a spoken back-and-forth conversation; press again to end." },
+  { id: "cancel", label: "Cancel", description: "Throw away the current recording." },
 ];
+
 
 /** Human-readable primary status line, derived from the dictation state machine. */
 function statusHeadline(snapshot: DictationSnapshot, configured: boolean): string {
@@ -168,7 +172,7 @@ export function HomePage() {
               </span>
               <span className="settings-row__action">
                 <span className="shortcut-chip">
-                  {shortcut.keys.map((key) => (
+                  {bindingKeys(settings?.shortcuts?.[shortcut.id]).map((key) => (
                     <kbd key={key}>{key}</kbd>
                   ))}
                 </span>
@@ -179,8 +183,11 @@ export function HomePage() {
       </section>
 
       <div className="command-row command-row--secondary">
-        <Button variant="secondary" disabled={!configured || listening} icon={<MessageSquare size={16} />} onClick={() => void native.start("command")}>
-          Open Command Mode
+        <Button variant="secondary" icon={<MessageSquare size={16} />} onClick={() => navigate("/assistant-settings")}>
+          Open assistant
+        </Button>
+        <Button variant="secondary" disabled={!configured || listening} icon={<AudioLines size={16} />} onClick={() => void native.startVoiceAgent()}>
+          Talk to the assistant
         </Button>
         <Button variant="secondary" disabled={!configured || listening} icon={<Headphones size={16} />} onClick={() => void native.start("call")}>
           Call Mode

@@ -87,6 +87,17 @@ pub async fn speak_text(state: State<'_, AppState>, text: String) -> Result<Stri
 }
 
 #[tauri::command]
+pub async fn start_voice_agent(app: AppHandle, state: State<'_, AppState>) -> Result<(), AppError> {
+    crate::voice_agent::start(&app, &state).await
+}
+
+#[tauri::command]
+pub async fn stop_voice_agent(state: State<'_, AppState>) -> Result<(), AppError> {
+    crate::voice_agent::stop(&state).await;
+    Ok(())
+}
+
+#[tauri::command]
 pub fn list_assistant_chats(
     state: State<'_, AppState>,
 ) -> Result<Vec<crate::database::AssistantChatSummary>, AppError> {

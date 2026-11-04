@@ -79,6 +79,21 @@
         "alwaysOnTop": true,
         "skipTaskbar": true,
         "visible": false
+      },
+      {
+        "label": "agent",
+        "title": "VoiceFlow Voice Agent",
+        "url": "index.html#/agent",
+        "width": 380,
+        "height": 132,
+        "resizable": false,
+        "decorations": false,
+        "transparent": true,
+        "shadow": false,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "focus": false,
+        "visible": false
       }
     ],
     "security": {

@@ -208,6 +208,9 @@ pub struct AppSettings {
     pub keep_transcription_warm: bool,
     /// Save assistant conversations and let the assistant recall them later.
     pub assistant_remember_chats: bool,
+    /// Let the user talk over the voice agent. Off by default because, on
+    /// speakers, the agent would hear (and answer) its own voice.
+    pub voice_agent_interruptible: bool,
     pub auto_apply_transform: Option<String>,
     pub paste_delay_ms: u64,
     pub restore_clipboard: bool,
@@ -279,6 +282,7 @@ impl Default for AppSettings {
             cleanup_min_words: 8,
             keep_transcription_warm: true,
             assistant_remember_chats: true,
+            voice_agent_interruptible: false,
             auto_apply_transform: None,
             paste_delay_ms: 140,
             restore_clipboard: true,

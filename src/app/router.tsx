@@ -3,6 +3,7 @@ import { AppLayout } from "../components/layout/AppLayout";
 import { RecordingOverlay } from "../overlay/RecordingOverlay";
 import { BuddyOverlay } from "../buddy/BuddyOverlay";
 import { AssistantDrawer } from "../assistant/AssistantDrawer";
+import { AgentDock } from "../agent/AgentDock";
 import { AboutPage } from "../pages/AboutPage";
 import { AssistantPage } from "../pages/AssistantPage";
 import { DictationPage } from "../pages/DictationPage";
@@ -19,6 +20,7 @@ export function AppRouter() {
         <Route path="/overlay" element={<RecordingOverlay />} />
         <Route path="/buddy" element={<BuddyOverlay />} />
         <Route path="/assistant" element={<AssistantDrawer />} />
+        <Route path="/agent" element={<AgentDock />} />
         <Route element={<AppLayout />}>
           <Route index element={<HomePage />} />
           <Route path="dictation" element={<DictationPage />} />

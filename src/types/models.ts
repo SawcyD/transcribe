@@ -136,6 +136,8 @@ export interface AppSettings {
   keepTranscriptionWarm: boolean;
   /** Save assistant chats and let the assistant recall them later. */
   assistantRememberChats: boolean;
+  /** Let the user talk over the voice agent (best with headphones). */
+  voiceAgentInterruptible: boolean;
   backtrackingEnabled: boolean;
   spokenFormattingEnabled: boolean;
   voiceActionsEnabled: boolean;
@@ -179,6 +181,7 @@ export interface ShortcutBindings {
   handsFree: ShortcutBinding;
   commandMode: ShortcutBinding;
   cancel: ShortcutBinding;
+  voiceAgent: ShortcutBinding;
 }
 
 export type ShortcutActionId = keyof ShortcutBindings;

@@ -295,3 +295,37 @@ html:has(.bubble), html:has(.bubble) body, html:has(.bubble) #root { min-width: 
 .saved-chat__preview { overflow: hidden; color: var(--memora-text-secondary); font-size: 12.5px; text-overflow: ellipsis; white-space: nowrap; }
 .saved-chat__meta { color: var(--memora-text-tertiary); font-size: 11.5px; }
 .empty-state svg { margin: 0 auto 4px; color: var(--memora-text-tertiary); }
+
+/* --- Voice agent: purple agent pill above a blue "you" pill --- */
+html:has(.agent-dock), html:has(.agent-dock) body, html:has(.agent-dock) #root { min-width: 0; min-height: 0; height: 100%; background: transparent; overflow: hidden; }
+.agent-dock { --assistant: #a78bfa; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; gap: 8px; width: 100vw; height: 100vh; padding: 0 10px 2px; user-select: none; }
+.agent-pill, .you-pill { display: flex; align-items: center; gap: 10px; border-radius: 999px; background: color-mix(in srgb, var(--memora-acrylic, #1f1f24) 70%, rgb(14 16 20 / .94)); backdrop-filter: blur(28px); }
+.agent-pill { width: 300px; height: 44px; padding: 0 14px; background: color-mix(in srgb, var(--memora-acrylic, #1f1f24) 60%, rgb(28 18 48 / .95)); box-shadow: 0 0 0 1px color-mix(in srgb, var(--assistant) 55%, transparent), 0 0 24px color-mix(in srgb, var(--assistant) 22%, transparent); transition: box-shadow 200ms; }
+.agent-pill--speaking { box-shadow: 0 0 0 1px var(--assistant), 0 0 32px color-mix(in srgb, var(--assistant) 45%, transparent); }
+.agent-pill--error { box-shadow: 0 0 0 1px color-mix(in srgb, var(--danger) 60%, transparent); }
+.agent-pill__orb { flex: 0 0 auto; width: 10px; height: 10px; border-radius: 50%; background: var(--assistant); box-shadow: 0 0 12px var(--assistant); }
+.agent-pill__orb--busy { animation: overlay-pulse 1.1s ease-out infinite; }
+.agent-pill__text, .you-pill__text { flex: 1 1 auto; min-width: 0; overflow: hidden; color: var(--ink); font-size: 12.5px; text-overflow: ellipsis; white-space: nowrap; }
+.agent-pill__caption { display: block; overflow: hidden; direction: rtl; text-align: left; text-overflow: ellipsis; white-space: nowrap; }
+.agent-pill__caption bdi { direction: ltr; unicode-bidi: isolate; }
+.agent-pill__wave, .you-pill__wave { flex: 0 0 52px; }
+.agent-pill__wave .audio-wave-bar { background: var(--assistant); }
+.agent-pill__wave--idle { opacity: .35; }
+.you-pill { width: 360px; height: 48px; padding: 0 8px 0 16px; box-shadow: 0 0 0 1px color-mix(in srgb, var(--ink) 14%, transparent); }
+.you-pill__dot { flex: 0 0 auto; width: 8px; height: 8px; border-radius: 50%; background: var(--faint); }
+.you-pill--active .you-pill__dot { background: var(--accent); animation: overlay-pulse 1.6s ease-out infinite; }
+.you-pill__end { display: grid; flex: 0 0 auto; place-items: center; width: 30px; height: 30px; color: #fff; background: color-mix(in srgb, var(--danger) 75%, black); border: 0; border-radius: 50%; cursor: pointer; }
+.you-pill__end:hover { background: var(--danger); }
+.assistant-tabs__actions { display: inline-flex; align-items: center; gap: 8px; }
+
+/* --- Dictation: one card per way of using your voice --- */
+.mode-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 8px; }
+.mode-card { display: flex; gap: 12px; padding: 12px 14px; border: 1px solid var(--vf-stroke); border-radius: 12px; background: color-mix(in srgb, var(--memora-text) 2%, transparent); }
+.mode-card__icon { display: grid; flex: 0 0 auto; place-items: center; width: 32px; height: 32px; color: var(--memora-accent-usable); border-radius: 10px; background: var(--vf-accent-soft); }
+.mode-card--assistant .mode-card__icon { color: #a78bfa; background: rgb(167 139 250 / .16); }
+.mode-card__body { display: grid; gap: 3px; min-width: 0; }
+.mode-card__title { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 10px; }
+.mode-card__title strong { font-size: 13.5px; }
+.mode-card__how { color: var(--memora-text-secondary); font-size: 12.5px; line-height: 1.45; }
+.mode-card__result { color: var(--memora-text); font-size: 12px; font-weight: 550; }
+.mode-card__start { color: var(--memora-text-tertiary); font-size: 11.5px; }

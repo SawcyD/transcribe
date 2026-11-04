@@ -42,6 +42,8 @@ pub struct AppState {
     /// Pre-opened transcription socket for the next dictation (see
     /// `transcription::standby`). A plain mutex: it is only swapped in and out.
     pub transcription_standby: std::sync::Mutex<Option<crate::transcription::Standby>>,
+    /// The live voice-agent conversation, when one is running.
+    pub voice_agent: Mutex<Option<crate::voice_agent::AgentHandle>>,
     /// Lock-free mirrors of the two window-behaviour settings. Window events are
     /// delivered synchronously on the UI thread, where awaiting `settings` could
     /// deadlock against a task already holding it.
@@ -66,6 +68,7 @@ impl AppState {
             dictation: Mutex::new(DictationRuntime::default()),
             assistant: Mutex::new(AssistantRuntime::default()),
             transcription_standby: std::sync::Mutex::new(None),
+            voice_agent: Mutex::new(None),
             close_to_tray,
             minimize_to_tray,
         }

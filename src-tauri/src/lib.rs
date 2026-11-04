@@ -10,6 +10,7 @@ mod database;
 mod dictation;
 mod errors;
 mod tts;
+mod voice_agent;
 mod insertion;
 mod models;
 mod security;
@@ -208,8 +209,19 @@ pub fn run() {
                                 let _ = dictation::cancel(&app, &state).await;
                             }
                         }
+                        // Press to start a spoken conversation, press again to end it.
+                        (ShortcutAction::VoiceAgent, true) => {
+                            if let Err(error) = voice_agent::toggle(&app, &state).await {
+                                log::warn!(
+                                    "voice agent failed; category={}",
+                                    error.payload().category
+                                );
+                            }
+                        }
                         // Release edges for toggle-style actions carry no meaning.
-                        (ShortcutAction::HandsFree, false) | (ShortcutAction::Cancel, false) => {}
+                        (ShortcutAction::HandsFree, false)
+                        | (ShortcutAction::Cancel, false)
+                        | (ShortcutAction::VoiceAgent, false) => {}
                     }
                 }
                 log::error!("shortcut dispatcher stopped");
@@ -250,6 +262,8 @@ pub fn run() {
             commands::list_assistant_chats,
             commands::get_assistant_chat,
             commands::delete_assistant_chat,
+            commands::start_voice_agent,
+            commands::stop_voice_agent,
             commands::list_dictionary_entries,
             commands::dashboard_stats,
             commands::get_settings,
