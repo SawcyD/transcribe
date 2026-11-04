@@ -44,12 +44,29 @@ jobs:
       - name: Install frontend dependencies
         run: pnpm install --frozen-lockfile
 
+      # The tag, package.json and tauri.conf.json must agree, or the updater
+      # would advertise a different version than the one installed.
+      - name: Check version and read release notes
+        shell: bash
+        run: |
+          version=$(node -p "require('./package.json').version")
+          if [ "${GITHUB_REF_TYPE}" = "tag" ] && [ "${GITHUB_REF_NAME}" != "v${version}" ]; then
+            echo "::error::Tag ${GITHUB_REF_NAME} does not match package.json version ${version}. Run: pnpm release:version ${GITHUB_REF_NAME#v}"
+            exit 1
+          fi
+          {
+            echo "RELEASE_NOTES<<__NOTES__"
+            node scripts/release-notes.mjs "${version}"
+            echo "__NOTES__"
+          } >> "$GITHUB_ENV"
+
       - name: Build and publish signed release
         uses: tauri-apps/tauri-action@v1
         with:
           tagName: v__VERSION__
           releaseName: VoiceFlow v__VERSION__
-          releaseBody: "See the release assets for the Windows installer and signed updater metadata."
+          # Shown on the GitHub release page and in the app's update dialog.
+          releaseBody: ${{ env.RELEASE_NOTES }}
           releaseDraft: false
           prerelease: false
           updaterJsonPreferNsis: true
