@@ -203,6 +203,9 @@ pub struct AppSettings {
     /// Dictations shorter than this many words skip the AI cleanup round trip
     /// (deterministic cleanup still runs). 0 sends everything to the AI.
     pub cleanup_min_words: u32,
+    /// Keep a Deepgram connection open between dictations so the next one
+    /// starts without a handshake. Idle connections close after 5 minutes.
+    pub keep_transcription_warm: bool,
     pub auto_apply_transform: Option<String>,
     pub paste_delay_ms: u64,
     pub restore_clipboard: bool,
@@ -272,6 +275,7 @@ impl Default for AppSettings {
             cleanup_model: "gpt-4.1-mini".into(),
             cleanup_style: "balanced".into(),
             cleanup_min_words: 8,
+            keep_transcription_warm: true,
             auto_apply_transform: None,
             paste_delay_ms: 140,
             restore_clipboard: true,
@@ -478,7 +482,6 @@ pub struct TranscriptionConfig {
     pub punctuation: bool,
     pub smart_formatting: bool,
     pub dictionary_keyterms: Vec<String>,
-    pub active_application: Option<String>,
     pub developer_mode: bool,
     pub endpointing_ms: u32,
 }

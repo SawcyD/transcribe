@@ -70,6 +70,7 @@ pub fn run() {
             let database = database::Database::open(&data_dir.join(DATABASE_FILE))?;
             let settings = database.load_settings()?;
             app.manage(AppState::new(database, settings));
+            tauri::async_runtime::spawn(dictation::warm_up_transcription(app.handle().clone()));
             setup_tray(app)?;
             watch_tray_state(app);
             show_buddy(app);

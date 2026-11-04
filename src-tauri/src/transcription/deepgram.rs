@@ -14,7 +14,10 @@ use crate::{
     models::{TranscriptionConfig, TranscriptionResult, WordTiming},
 };
 
-use super::provider::{ProviderEvent, SessionHandle, TranscriptionProvider};
+use super::{
+    provider::{ProviderEvent, SessionHandle, TranscriptionProvider},
+    standby::{ConnectionKey, Socket, Standby},
+};
 
 pub(crate) enum DeepgramInput {
     Audio(Vec<u8>),
@@ -24,6 +27,7 @@ pub(crate) enum DeepgramInput {
 pub struct DeepgramProvider {
     api_key: String,
     event_sender: mpsc::UnboundedSender<ProviderEvent>,
+    standby: std::sync::Mutex<Option<Standby>>,
 }
 
 impl DeepgramProvider {
@@ -31,48 +35,90 @@ impl DeepgramProvider {
         Self {
             api_key,
             event_sender,
+            standby: std::sync::Mutex::new(None),
         }
     }
+
+    /// Offers a pre-opened socket; it is used only if it was opened for exactly
+    /// the connection this session needs.
+    pub fn with_standby(self, standby: Option<Standby>) -> Self {
+        if let Ok(mut slot) = self.standby.lock() {
+            *slot = standby;
+        }
+        self
+    }
+}
+
+/// The streaming URL for a session. Everything that shapes recognition lives
+/// here, so it doubles as the identity of a warm connection.
+pub(crate) fn listen_url(config: &TranscriptionConfig) -> url::Url {
+    let mut url = url::Url::parse("wss://api.deepgram.com/v1/listen")
+        .expect("Deepgram endpoint is static and valid");
+    {
+        let mut query = url.query_pairs_mut();
+        query
+            .append_pair("model", &config.model)
+            .append_pair("language", &config.language)
+            .append_pair("encoding", &config.encoding)
+            .append_pair("sample_rate", &config.sample_rate.to_string())
+            .append_pair("channels", "1")
+            .append_pair("interim_results", bool_str(config.interim_results))
+            .append_pair("punctuate", bool_str(config.punctuation))
+            .append_pair("smart_format", bool_str(config.smart_formatting))
+            .append_pair("endpointing", &config.endpointing_ms.to_string());
+        for keyterm in config.dictionary_keyterms.iter().take(100) {
+            query.append_pair("keyterm", keyterm);
+        }
+        if config.developer_mode {
+            query
+                .append_pair("keyterm", "camelCase")
+                .append_pair("keyterm", "PascalCase");
+        }
+        // The foreground app's process name used to be sent as a usage `tag`.
+        // It varied per dictation (which would defeat connection reuse) and is
+        // only reporting metadata, so it is no longer sent to Deepgram.
+    }
+    url
+}
+
+pub(crate) fn connection_key(config: &TranscriptionConfig, api_key: &str) -> ConnectionKey {
+    ConnectionKey::new(listen_url(config).as_str(), api_key)
+}
+
+/// Opens a fresh streaming socket (TLS + WebSocket handshake).
+pub(crate) async fn connect(config: &TranscriptionConfig, api_key: &str) -> Result<Socket, AppError> {
+    let mut request = listen_url(config)
+        .as_str()
+        .into_client_request()
+        .map_err(|error| AppError::Transcription(error.to_string()))?;
+    let authorization = format!("Token {api_key}").parse().map_err(|_| {
+        AppError::Credential("Deepgram credential contains invalid header characters".into())
+    })?;
+    request.headers_mut().insert("Authorization", authorization);
+    let (socket, _) = connect_async(request).await.map_err(map_websocket_error)?;
+    Ok(socket)
 }
 
 #[async_trait]
 impl TranscriptionProvider for DeepgramProvider {
     async fn start_session(&self, config: TranscriptionConfig) -> Result<SessionHandle, AppError> {
-        let mut url = url::Url::parse("wss://api.deepgram.com/v1/listen")
-            .expect("Deepgram endpoint is static and valid");
-        {
-            let mut query = url.query_pairs_mut();
-            query
-                .append_pair("model", &config.model)
-                .append_pair("language", &config.language)
-                .append_pair("encoding", &config.encoding)
-                .append_pair("sample_rate", &config.sample_rate.to_string())
-                .append_pair("channels", "1")
-                .append_pair("interim_results", bool_str(config.interim_results))
-                .append_pair("punctuate", bool_str(config.punctuation))
-                .append_pair("smart_format", bool_str(config.smart_formatting))
-                .append_pair("endpointing", &config.endpointing_ms.to_string());
-            for keyterm in config.dictionary_keyterms.iter().take(100) {
-                query.append_pair("keyterm", keyterm);
-            }
-            if config.developer_mode {
-                query
-                    .append_pair("keyterm", "camelCase")
-                    .append_pair("keyterm", "PascalCase");
-            }
-            if let Some(application) = config.active_application.as_deref() {
-                query.append_pair("tag", application);
-            }
-        }
-        let mut request = url
-            .as_str()
-            .into_client_request()
-            .map_err(|error| AppError::Transcription(error.to_string()))?;
-        let authorization = format!("Token {}", self.api_key).parse().map_err(|_| {
-            AppError::Credential("Deepgram credential contains invalid header characters".into())
-        })?;
-        request.headers_mut().insert("Authorization", authorization);
-        let (socket, _) = connect_async(request).await.map_err(map_websocket_error)?;
+        let connect_started = Instant::now();
+        let standby = self.standby.lock().ok().and_then(|mut slot| slot.take());
+        let wanted = connection_key(&config, &self.api_key);
+        let warm = match standby {
+            Some(standby) if standby.key() == wanted => standby.take().await,
+            // Settings, dictionary or app profile changed: discard and connect.
+            _ => None,
+        };
+        let reused = warm.is_some();
+        let socket = match warm {
+            Some(socket) => socket,
+            None => connect(&config, &self.api_key).await?,
+        };
+        log::info!(
+            "deepgram session ready; reused_connection={reused} connect_ms={}",
+            connect_started.elapsed().as_millis()
+        );
         let (audio_sender, mut audio_receiver) = mpsc::channel::<DeepgramInput>(256);
         let event_sender = self.event_sender.clone();
         let worker = tokio::spawn(async move {

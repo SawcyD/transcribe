@@ -274,7 +274,9 @@ fn process_samples(
     for sample in streamed {
         bytes.extend_from_slice(&sample.to_le_bytes());
     }
-    if sender.try_send(bytes).is_err() {
+    // A closed channel means the provider session ended; only a full buffer
+    // is worth a warning.
+    if let Err(mpsc::error::TrySendError::Full(_)) = sender.try_send(bytes) {
         log::warn!("audio stream buffer full; dropping a chunk");
     }
 }

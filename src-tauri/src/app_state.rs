@@ -39,6 +39,9 @@ pub struct AppState {
     pub settings: RwLock<AppSettings>,
     pub dictation: Mutex<DictationRuntime>,
     pub assistant: Mutex<AssistantRuntime>,
+    /// Pre-opened transcription socket for the next dictation (see
+    /// `transcription::standby`). A plain mutex: it is only swapped in and out.
+    pub transcription_standby: std::sync::Mutex<Option<crate::transcription::Standby>>,
     /// Lock-free mirrors of the two window-behaviour settings. Window events are
     /// delivered synchronously on the UI thread, where awaiting `settings` could
     /// deadlock against a task already holding it.
@@ -62,6 +65,7 @@ impl AppState {
             settings: RwLock::new(settings),
             dictation: Mutex::new(DictationRuntime::default()),
             assistant: Mutex::new(AssistantRuntime::default()),
+            transcription_standby: std::sync::Mutex::new(None),
             close_to_tray,
             minimize_to_tray,
         }
@@ -73,6 +77,17 @@ impl AppState {
             .store(settings.close_to_tray, Ordering::Relaxed);
         self.minimize_to_tray
             .store(settings.minimize_to_tray, Ordering::Relaxed);
+    }
+
+    pub fn take_transcription_standby(&self) -> Option<crate::transcription::Standby> {
+        self.transcription_standby.lock().ok().and_then(|mut slot| slot.take())
+    }
+
+    /// Replacing an older standby drops it, which closes its socket.
+    pub fn set_transcription_standby(&self, standby: Option<crate::transcription::Standby>) {
+        if let Ok(mut slot) = self.transcription_standby.lock() {
+            *slot = standby;
+        }
     }
 
     pub fn close_to_tray(&self) -> bool {

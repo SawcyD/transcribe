@@ -264,6 +264,17 @@ export function DictationPage() {
           }
         />
         <SettingsRow label="Streaming transcription" action={<span className="settings-row__value">On</span>} />
+        <SettingsRow
+          label="Keep connection warm"
+          description="Keeps a Deepgram connection ready between dictations so recording starts without a handshake. No audio is sent while idle; closes after 5 minutes unused."
+          action={
+            <ToggleSwitch
+              label="Keep connection warm"
+              checked={settings.keepTranscriptionWarm}
+              onChange={(value) => update("keepTranscriptionWarm", value)}
+            />
+          }
+        />
       </SettingsSection>
 
       <SettingsSection title="Cleanup">

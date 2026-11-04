@@ -113,6 +113,9 @@ pub async fn save_settings(
     // Rebinding takes effect immediately; the hook thread keeps running.
     crate::shortcuts::update_bindings(&settings.shortcuts);
     *state.settings.write().await = settings.clone();
+    if !settings.keep_transcription_warm {
+        state.set_transcription_standby(None);
+    }
     Ok(settings)
 }
 

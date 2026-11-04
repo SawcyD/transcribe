@@ -132,6 +132,8 @@ export interface AppSettings {
   removeFalseStarts: boolean;
   /** Dictations shorter than this skip AI cleanup; 0 always uses it. */
   cleanupMinWords: number;
+  /** Keep a Deepgram connection open between dictations for a faster start. */
+  keepTranscriptionWarm: boolean;
   backtrackingEnabled: boolean;
   spokenFormattingEnabled: boolean;
   voiceActionsEnabled: boolean;

@@ -21,7 +21,7 @@ use crate::{
         TranscriptionConfig,
     },
     security::{self, CredentialKind},
-    transcription::{DeepgramProvider, ProviderEvent, TranscriptionProvider},
+    transcription::{self, DeepgramProvider, ProviderEvent, TranscriptionProvider},
     transforms::{self, TransformRequest},
 };
 
@@ -76,29 +76,22 @@ pub async fn start(
             return Err(error);
         }
     };
-    let config = TranscriptionConfig {
-        language: settings.language.clone(),
-        model: settings.transcription_model.clone(),
-        sample_rate: capture.stream_sample_rate,
-        encoding: "linear16".into(),
-        interim_results: true,
-        punctuation: true,
-        smart_formatting: true,
-        dictionary_keyterms: keyterms,
-        active_application: target.process_name.clone(),
-        // A code-oriented cleanup style is the signal that this app wants the
-        // developer transcription profile too.
-        developer_mode: matches!(
-            settings
-                .cleanup_style_for(target.process_name.as_deref())
-                .as_str(),
-            "developer" | "code_literal"
-        ),
-        endpointing_ms: 300,
-    };
+    let config = transcription_config(
+        &settings,
+        keyterms,
+        capture.stream_sample_rate,
+        target.process_name.as_deref(),
+    );
     let (event_sender, event_receiver) = mpsc::unbounded_channel();
     spawn_interim_forwarder(app.clone(), session_id.clone(), event_receiver);
-    let transcription = tokio::spawn(stream_transcription(receiver, config, event_sender));
+    let standby = state.take_transcription_standby();
+    let transcription = tokio::spawn(stream_transcription(
+        app.clone(),
+        receiver,
+        config,
+        event_sender,
+        standby,
+    ));
 
     {
         let mut runtime = state.dictation.lock().await;
@@ -597,20 +590,98 @@ pub async fn cancel(app: &AppHandle, state: &AppState) -> Result<DictationSnapsh
     Ok(state.dictation.lock().await.machine.snapshot())
 }
 
+fn transcription_config(
+    settings: &crate::models::AppSettings,
+    keyterms: Vec<String>,
+    sample_rate: u32,
+    process_name: Option<&str>,
+) -> TranscriptionConfig {
+    TranscriptionConfig {
+        language: settings.language.clone(),
+        model: settings.transcription_model.clone(),
+        sample_rate,
+        encoding: "linear16".into(),
+        interim_results: true,
+        punctuation: true,
+        smart_formatting: true,
+        dictionary_keyterms: keyterms,
+        // A code-oriented cleanup style is the signal that this app wants the
+        // developer transcription profile too.
+        developer_mode: matches!(
+            settings.cleanup_style_for(process_name).as_str(),
+            "developer" | "code_literal"
+        ),
+        endpointing_ms: 300,
+    }
+}
+
 async fn stream_transcription(
+    app: AppHandle,
     mut receiver: mpsc::Receiver<Vec<u8>>,
     config: TranscriptionConfig,
     event_sender: mpsc::UnboundedSender<ProviderEvent>,
+    standby: Option<transcription::Standby>,
 ) -> Result<crate::models::TranscriptionResult, AppError> {
     let api_key = tokio::task::spawn_blocking(|| security::get(CredentialKind::Deepgram))
         .await
         .map_err(|error| AppError::Credential(error.to_string()))??;
-    let provider = DeepgramProvider::new(api_key, event_sender);
-    let session = provider.start_session(config).await?;
+    let provider = DeepgramProvider::new(api_key.clone(), event_sender).with_standby(standby);
+    let session = provider.start_session(config.clone()).await?;
+    let mut result = Ok(());
     while let Some(chunk) = receiver.recv().await {
-        provider.send_audio(&session, &chunk).await?;
+        if let Err(error) = provider.send_audio(&session, &chunk).await {
+            result = Err(error);
+            break;
+        }
     }
-    provider.finish_session(session).await
+    let outcome = match result {
+        Ok(()) => provider.finish_session(session).await,
+        Err(error) => Err(error),
+    };
+    // Open the next session's connection now, while nobody is waiting on it.
+    tauri::async_runtime::spawn(prepare_standby(app, config, api_key));
+    outcome
+}
+
+/// Opens and parks a connection for the next dictation, assuming it will look
+/// like the one just used (same app profile, sample rate and dictionary).
+async fn prepare_standby(app: AppHandle, config: TranscriptionConfig, api_key: String) {
+    let state = app.state::<AppState>();
+    if !state.settings.read().await.keep_transcription_warm {
+        return;
+    }
+    let key = transcription::connection_key(&config, &api_key);
+    match transcription::connect(&config, &api_key).await {
+        Ok(socket) => {
+            state.set_transcription_standby(Some(transcription::Standby::keep_alive(key, socket)));
+            log::debug!("deepgram standby connection ready");
+        }
+        Err(error) => log::debug!(
+            "deepgram standby connection failed; category={}",
+            error.payload().category
+        ),
+    }
+}
+
+/// Warms a connection at launch so even the first dictation skips the
+/// handshake. Uses the default app profile and the 16 kHz stream rate.
+pub async fn warm_up_transcription(app: AppHandle) {
+    let state = app.state::<AppState>();
+    let settings = state.settings.read().await.clone();
+    if !settings.keep_transcription_warm {
+        return;
+    }
+    let Ok(keyterms) = state.database.dictionary_keyterms() else {
+        return;
+    };
+    let Ok(Ok(api_key)) =
+        tokio::task::spawn_blocking(|| security::get(CredentialKind::Deepgram)).await
+    else {
+        // No key configured yet: nothing to warm.
+        return;
+    };
+    let config = transcription_config(&settings, keyterms, audio::STREAM_SAMPLE_RATE, None);
+    prepare_standby(app.clone(), config, api_key).await;
 }
 
 fn spawn_interim_forwarder(

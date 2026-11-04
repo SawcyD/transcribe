@@ -64,6 +64,7 @@ export const defaultSettings: AppSettings = {
   removeFillerWords: true,
   removeFalseStarts: true,
   cleanupMinWords: 8,
+  keepTranscriptionWarm: true,
   backtrackingEnabled: true,
   spokenFormattingEnabled: true,
   voiceActionsEnabled: true,

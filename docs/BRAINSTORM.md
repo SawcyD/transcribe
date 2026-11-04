@@ -53,7 +53,7 @@ more trustworthy is parked.
 ## Converge — strongest directions
 
 1. **Trust**: the dock must only say what actually happened (done).
-2. **Perceived speed**: live caption + 16 kHz + no dropped first words (done); short dictations (< 8 words, configurable) now skip the AI cleanup round trip unless they contain spoken code (done). Next is the persistent socket.
+2. **Perceived speed**: live caption + 16 kHz + no dropped first words (done); short dictations (< 8 words, configurable) now skip the AI cleanup round trip unless they contain spoken code (done). A Deepgram connection is now pre-opened and kept warm between dictations (done).
 3. **Recovery**: a Retry action on errors using the audio that's already kept.
 
 Riskiest assumption: that Deepgram accuracy is unchanged at 16 kHz on the user's mic. Check by
