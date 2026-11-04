@@ -487,9 +487,6 @@ kbd { display: inline-flex; align-items: center; justify-content: center; min-wi
 .voiceflow-settings-row-button { display: block; width: 100%; padding: 0; border: 0; background: transparent; color: inherit; text-align: left; }
 .voiceflow-settings-row-button:hover .memora-settings-row { background: var(--memora-subtle-hover); }
 .voiceflow-command-bar { margin-bottom: 14px; border: 1px solid var(--memora-stroke); border-radius: var(--memora-radius-lg); background: var(--memora-card); }
-.history-list:has(.voiceflow-history-grid) { overflow: auto; border: 0; background: transparent; }
-.history-list:has(.voiceflow-history-grid) .history-scroll { display: none; }
-.voiceflow-history-grid { min-width: 780px; }
 .voiceflow-status-rows { display: grid; gap: 2px; margin-top: 10px; max-width: 420px; }
 .status-panel .memora-progress { margin-top: 12px; max-width: 420px; }
 

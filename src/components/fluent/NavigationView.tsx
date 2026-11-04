@@ -1,4 +1,4 @@
-import { NavigationView as MemoraNavigationView, Tooltip, type NavigationItem as MemoraNavigationItem } from "@memora/ui";
+import { NavigationView as MemoraNavigationView, type NavigationItem as MemoraNavigationItem } from "@memora/ui";
 import type { LucideIcon } from "lucide-react";
 import { useLocation, useNavigate } from "react-router-dom";
 
@@ -13,7 +13,6 @@ interface NavigationViewProps {
   items: NavigationItem[];
   footerItems: NavigationItem[];
   collapsed: boolean;
-  onToggleCollapse?: () => void;
 }
 
 function toMemoraItem(item: NavigationItem): MemoraNavigationItem {
@@ -22,24 +21,22 @@ function toMemoraItem(item: NavigationItem): MemoraNavigationItem {
 }
 
 /** Maps the router-aware VoiceFlow navigation onto Memora's keyboard navigation. */
-export function NavigationView({ items, footerItems, collapsed, onToggleCollapse }: NavigationViewProps) {
+export function NavigationView({ items, footerItems, collapsed }: NavigationViewProps) {
   const navigate = useNavigate();
   const location = useLocation();
   const selectedId = [...items, ...footerItems].find((item) => item.to === location.pathname)?.to ?? "/";
 
+  // The collapse control lives in the sidebar header (AppLayout). The old
+  // tooltip wrapped the whole pane, so hovering *anywhere* in the sidebar
+  // popped up "Collapse navigation".
   return (
-    <Tooltip content={collapsed ? "Expand navigation" : "Collapse navigation"} placement="right">
-      <div>
-        <MemoraNavigationView
-          items={items.map(toMemoraItem)}
-          footerItems={footerItems.map(toMemoraItem)}
-          selectedId={selectedId}
-          collapsed={collapsed}
-          onToggleCollapse={onToggleCollapse}
-          onSelect={(to) => navigate(to)}
-          ariaLabel="VoiceFlow navigation"
-        />
-      </div>
-    </Tooltip>
+    <MemoraNavigationView
+      items={items.map(toMemoraItem)}
+      footerItems={footerItems.map(toMemoraItem)}
+      selectedId={selectedId}
+      collapsed={collapsed}
+      onSelect={(to) => navigate(to)}
+      ariaLabel="VoiceFlow navigation"
+    />
   );
 }

@@ -164,7 +164,14 @@ export function HomePage() {
       </div>
 
       <section className="settings-group" aria-label="Recent activity">
-        <h2 className="settings-group__title">Recent activity</h2>
+        <div className="section-heading">
+          <h2 className="settings-group__title">Recent activity</h2>
+          {recent.length > 0 && (
+            <button type="button" className="text-button" onClick={() => navigate("/history")}>
+              View all
+            </button>
+          )}
+        </div>
         {recent.length === 0 ? (
           <div className="empty-state">
             <strong>No dictations yet</strong>
@@ -180,7 +187,10 @@ export function HomePage() {
                 onClick={() => navigate("/history", { state: { transcriptId: record.id } })}
               >
                 <time>{new Date(record.createdAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</time>
-                <span className="activity-row__app">{record.applicationName ?? "Unknown app"}</span>
+                <span className="activity-row__body">
+                  <span className="activity-row__app">{record.applicationName ?? "Unknown app"}</span>
+                  <span className="activity-row__excerpt">{record.finalTranscript}</span>
+                </span>
                 <span className="activity-row__words">
                   {record.finalTranscript.trim().split(/\s+/).filter(Boolean).length} words
                 </span>

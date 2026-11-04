@@ -1,7 +1,7 @@
-import { ClipboardCopy, RotateCcw, Trash2, Wand2 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { Check, ClipboardCopy, RotateCcw, Trash2, Wand2, X } from "lucide-react";
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { ComboBox, CommandBar, CommandGroup, DataGrid, SearchBox, type DataGridColumn } from "@memora/ui";
+import { SearchBox } from "@memora/ui";
 import { Button } from "../components/common/Button";
 import { ContentDialog } from "../components/fluent/ContentDialog";
 import { native } from "../lib/native";
@@ -26,6 +26,22 @@ const MODE_LABELS: Record<TranscriptRecord["mode"], string> = {
   call: "Call",
   command: "Command Mode",
 };
+
+const STATUS_LABELS: Record<TranscriptRecord["insertionStatus"], string> = {
+  inserted: "Inserted",
+  copied: "Copied only",
+  failed: "Failed",
+  cancelled: "Cancelled",
+};
+
+function wordCount(text: string): number {
+  return text.trim().split(/\s+/).filter(Boolean).length;
+}
+
+function formatDuration(ms: number): string {
+  const seconds = Math.round(ms / 1000);
+  return seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
+}
 
 /** Groups records under Today / Yesterday / an absolute date. */
 function dayLabel(iso: string): string {
@@ -64,6 +80,8 @@ export function HistoryPage() {
   const [confirmingPaste, setConfirmingPaste] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [suppressPasteConfirm, setSuppressPasteConfirm] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const listRef = useRef<HTMLDivElement>(null);
 
   const load = async () => {
     const [next, stored] = await Promise.all([native.history(), native.settings()]);
@@ -124,13 +142,32 @@ export function HistoryPage() {
   };
 
   const stageValue = selected?.[stage] ?? "";
-  const gridColumns: DataGridColumn<TranscriptRecord>[] = [
-    { id: "created", header: "Date and time", width: 136, render: (record) => new Date(record.createdAt).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) },
-    { id: "application", header: "Application", width: 120, render: (record) => record.applicationName ?? "Unknown app" },
-    { id: "mode", header: "Mode", width: 108, render: (record) => MODE_LABELS[record.mode] },
-    { id: "duration", header: "Duration", width: 78, align: "end", render: (record) => `${(record.durationMs / 1000).toFixed(1)}s` },
-    { id: "final", header: "Final text", render: (record) => record.finalTranscript || "—" },
-  ];
+  const filtersActive = query !== "" || modeFilter !== "all" || appFilter !== "all" || dateFilter !== "any" || statusFilter !== "all";
+  const clearFilters = () => {
+    setQuery("");
+    setModeFilter("all");
+    setAppFilter("all");
+    setDateFilter("any");
+    setStatusFilter("all");
+  };
+
+  const copySelected = async () => {
+    if (!selected) return;
+    await native.copyText(selected.finalTranscript);
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 1500);
+  };
+
+  // Up/Down walk the visible list like a mail client; the selection follows.
+  const onListKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
+    event.preventDefault();
+    const index = filtered.findIndex((record) => record.id === selectedId);
+    const next = filtered[Math.min(filtered.length - 1, Math.max(0, index + (event.key === "ArrowDown" ? 1 : -1)))];
+    if (!next) return;
+    setSelectedId(next.id);
+    listRef.current?.querySelector<HTMLButtonElement>(`[data-id="${next.id}"]`)?.focus();
+  };
 
   return (
     <div className="page">
@@ -141,49 +178,66 @@ export function HistoryPage() {
         </p>
       </header>
 
-      <CommandBar role="search" className="voiceflow-command-bar">
-        <CommandGroup><SearchBox value={query} label="Search transcripts" placeholder="Search transcripts" onChange={setQuery} /></CommandGroup>
-        <CommandGroup>
-        <select className="settings-combo" aria-label="Filter by application" value={appFilter} onChange={(event) => setAppFilter(event.target.value)}>
-          <option value="all">All applications</option>
-          {applications.map((name) => (
-            <option key={name} value={name}>
-              {name}
-            </option>
-          ))}
-        </select>
-        <select className="settings-combo" aria-label="Filter by mode" value={modeFilter} onChange={(event) => setModeFilter(event.target.value as ModeFilter)}>
-          <option value="all">All modes</option>
-          {Object.entries(MODE_LABELS).map(([id, label]) => (
-            <option key={id} value={id}>
-              {label}
-            </option>
-          ))}
-        </select>
-        <ComboBox label="Filter by date" value={dateFilter} onChange={setDateFilter} options={[{ value: "any", label: "Any time" }, { value: "today", label: "Today" }, { value: "week", label: "Past 7 days" }, { value: "month", label: "Past 30 days" }]} />
-        <select className="settings-combo" aria-label="Filter by status" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as StatusFilter)}>
-          <option value="all">All statuses</option>
-          <option value="inserted">Inserted</option>
-          <option value="copied">Copied</option>
-          <option value="failed">Failed</option>
-          <option value="cancelled">Cancelled</option>
-        </select>
-        <small className="command-bar__count">
-          {filtered.length} {filtered.length === 1 ? "item" : "items"}
+      <div className="history-toolbar" role="search">
+        <div className="history-toolbar__search">
+          <SearchBox value={query} label="Search transcripts" placeholder="Search what you said…" onChange={setQuery} />
+        </div>
+        <div className="history-toolbar__filters">
+          <select className="filter-pill" aria-label="Filter by application" value={appFilter} data-active={appFilter !== "all"} onChange={(event) => setAppFilter(event.target.value)}>
+            <option value="all">All apps</option>
+            {applications.map((name) => (
+              <option key={name} value={name}>
+                {name}
+              </option>
+            ))}
+          </select>
+          <select className="filter-pill" aria-label="Filter by mode" value={modeFilter} data-active={modeFilter !== "all"} onChange={(event) => setModeFilter(event.target.value as ModeFilter)}>
+            <option value="all">All modes</option>
+            {Object.entries(MODE_LABELS).map(([id, label]) => (
+              <option key={id} value={id}>
+                {label}
+              </option>
+            ))}
+          </select>
+          <select className="filter-pill" aria-label="Filter by date" value={dateFilter} data-active={dateFilter !== "any"} onChange={(event) => setDateFilter(event.target.value as DateFilter)}>
+            <option value="any">Any time</option>
+            <option value="today">Today</option>
+            <option value="week">Past 7 days</option>
+            <option value="month">Past 30 days</option>
+          </select>
+          <select className="filter-pill" aria-label="Filter by status" value={statusFilter} data-active={statusFilter !== "all"} onChange={(event) => setStatusFilter(event.target.value as StatusFilter)}>
+            <option value="all">Any status</option>
+            {Object.entries(STATUS_LABELS).map(([id, label]) => (
+              <option key={id} value={id}>
+                {label}
+              </option>
+            ))}
+          </select>
+          {filtersActive && (
+            <button type="button" className="text-button" onClick={clearFilters}>
+              <X size={13} aria-hidden="true" /> Clear
+            </button>
+          )}
+        </div>
+        <small className="history-toolbar__count">
+          {filtered.length === records.length ? `${records.length} total` : `${filtered.length} of ${records.length}`}
         </small>
-        </CommandGroup>
-      </CommandBar>
+      </div>
 
       <section className="history-shell">
         <aside className="history-list">
-          {!loading && <DataGrid className="voiceflow-history-grid" rows={filtered} columns={gridColumns} rowKey={(record) => record.id} ariaLabel="Transcript history" selectedKeys={selectedId ? [selectedId] : []} onSelectionChange={(keys) => setSelectedId(typeof keys[0] === "string" ? keys[0] : null)} emptyMessage={records.length === 0 ? "No dictations yet. Hold Ctrl + Win and start speaking." : "No matching transcripts. Try clearing a filter."} />}
-          <div className="history-scroll">
+          <div className="history-scroll" ref={listRef} onKeyDown={onListKeyDown} aria-label="Transcripts">
             {loading ? (
               <p className="list-message">Loading history…</p>
             ) : grouped.length === 0 ? (
               <div className="empty-state">
                 <strong>{records.length === 0 ? "No dictations yet" : "No matching transcripts"}</strong>
-                <p>{records.length === 0 ? "Hold Ctrl + Win and start speaking." : "Try clearing a filter."}</p>
+                <p>{records.length === 0 ? "Hold Ctrl + Win and start speaking." : "Nothing matches these filters."}</p>
+                {records.length > 0 && (
+                  <button type="button" className="text-button" onClick={clearFilters}>
+                    Clear filters
+                  </button>
+                )}
               </div>
             ) : (
               grouped.map(([label, group]) => (
@@ -192,18 +246,24 @@ export function HistoryPage() {
                   {group.map((record) => (
                     <button
                       key={record.id}
+                      data-id={record.id}
                       type="button"
                       aria-current={record.id === selectedId}
+                      tabIndex={record.id === selectedId || (!selectedId && record === filtered[0]) ? 0 : -1}
                       className={`history-item${record.id === selectedId ? " history-item--active" : ""}`}
                       onClick={() => setSelectedId(record.id)}
                     >
-                      <span className="history-item__meta">
-                        <time>{new Date(record.createdAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</time>
+                      <span className="history-item__top">
                         <b>{record.applicationName ?? "Unknown app"}</b>
-                        <em>{MODE_LABELS[record.mode]}</em>
-                        <i>{record.finalTranscript.trim().split(/\s+/).filter(Boolean).length} words</i>
+                        {record.insertionStatus !== "inserted" && (
+                          <span className={`status-chip status-chip--${record.insertionStatus}`}>{STATUS_LABELS[record.insertionStatus]}</span>
+                        )}
+                        <time>{new Date(record.createdAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</time>
                       </span>
-                      <span className="history-item__excerpt">{record.finalTranscript}</span>
+                      <span className="history-item__excerpt">{record.finalTranscript || "—"}</span>
+                      <span className="history-item__meta">
+                        {MODE_LABELS[record.mode]} · {wordCount(record.finalTranscript)} words · {formatDuration(record.durationMs)}
+                      </span>
                     </button>
                   ))}
                 </div>
@@ -215,6 +275,44 @@ export function HistoryPage() {
         <article className="history-detail">
           {selected ? (
             <>
+              <header className="history-detail__header">
+                <div>
+                  <h2>{selected.applicationName ?? "Unknown app"}</h2>
+                  <p>
+                    {new Date(selected.createdAt).toLocaleString([], { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}
+                    {" · "}
+                    {MODE_LABELS[selected.mode]}
+                  </p>
+                </div>
+                <span className={`status-chip status-chip--${selected.insertionStatus}`}>{STATUS_LABELS[selected.insertionStatus]}</span>
+              </header>
+
+              <div className="history-detail__actions">
+                <Button variant="primary" icon={copied ? <Check size={15} /> : <ClipboardCopy size={15} />} onClick={() => void copySelected()}>
+                  {copied ? "Copied" : "Copy"}
+                </Button>
+                <Button
+                  variant="secondary"
+                  icon={<RotateCcw size={15} />}
+                  onClick={() => {
+                    if (settings?.confirmPasteAgain === false) void native.pasteTranscript(selected.id);
+                    else setConfirmingPaste(true);
+                  }}
+                >
+                  Paste again
+                </Button>
+                <Button
+                  variant="secondary"
+                  icon={<Wand2 size={15} />}
+                  onClick={() => navigate("/transforms", { state: { text: selected.finalTranscript } })}
+                >
+                  Transform
+                </Button>
+                <button type="button" className="icon-button icon-button--danger" aria-label="Delete transcript" title="Delete transcript" onClick={() => setConfirmingDelete(true)}>
+                  <Trash2 size={16} />
+                </button>
+              </div>
+
               <div className="segmented" role="tablist" aria-label="Transcript stage">
                 {STAGES.map((entry) => (
                   <button
@@ -236,24 +334,14 @@ export function HistoryPage() {
 
               <dl className="metadata-list">
                 <div>
-                  <dt>Application</dt>
-                  <dd>{selected.applicationName ?? "Unknown"}</dd>
+                  <dt>Length</dt>
+                  <dd>
+                    {wordCount(selected.finalTranscript)} words · {formatDuration(selected.durationMs)}
+                  </dd>
                 </div>
                 <div>
-                  <dt>Mode</dt>
-                  <dd>{MODE_LABELS[selected.mode]}</dd>
-                </div>
-                <div>
-                  <dt>Duration</dt>
-                  <dd>{(selected.durationMs / 1000).toFixed(1)} seconds</dd>
-                </div>
-                <div>
-                  <dt>Created</dt>
-                  <dd>{new Date(selected.createdAt).toLocaleString()}</dd>
-                </div>
-                <div>
-                  <dt>Insertion</dt>
-                  <dd>{selected.insertionStatus}</dd>
+                  <dt>Confidence</dt>
+                  <dd>{selected.confidence == null ? "—" : `${Math.round(selected.confidence * 100)}%`}</dd>
                 </div>
                 <div>
                   <dt>Provider</dt>
@@ -262,45 +350,15 @@ export function HistoryPage() {
                   </dd>
                 </div>
                 <div>
-                  <dt>Confidence</dt>
-                  <dd>{selected.confidence == null ? "—" : `${Math.round(selected.confidence * 100)}%`}</dd>
-                </div>
-                <div>
                   <dt>Transform</dt>
                   <dd>{selected.transformId ?? "None"}</dd>
                 </div>
               </dl>
-
-              <div className="command-row">
-                <Button variant="primary" icon={<ClipboardCopy size={15} />} onClick={() => void native.copyText(selected.finalTranscript)}>
-                  Copy
-                </Button>
-                <Button
-                  variant="secondary"
-                  icon={<RotateCcw size={15} />}
-                  onClick={() => {
-                    if (settings?.confirmPasteAgain === false) void native.pasteTranscript(selected.id);
-                    else setConfirmingPaste(true);
-                  }}
-                >
-                  Paste again
-                </Button>
-                <Button
-                  variant="secondary"
-                  icon={<Wand2 size={15} />}
-                  onClick={() => navigate("/transforms", { state: { text: selected.finalTranscript } })}
-                >
-                  Transform
-                </Button>
-                <Button variant="secondary" icon={<Trash2 size={15} />} onClick={() => setConfirmingDelete(true)}>
-                  Delete
-                </Button>
-              </div>
             </>
           ) : (
             <div className="empty-state">
               <strong>No transcript selected</strong>
-              <p>Choose an entry to see its stages and metadata.</p>
+              <p>Pick a dictation on the left to read, copy, or paste it again.</p>
             </div>
           )}
         </article>

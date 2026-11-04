@@ -1,4 +1,6 @@
 import { Plus, Trash2 } from "lucide-react";
+import { useAutoSave } from "../app/useAutoSave";
+import { SaveIndicator } from "../components/common/SaveIndicator";
 import { useEffect, useMemo, useState } from "react";
 import { ComboBox, NumberBox } from "@memora/ui";
 import { Button } from "../components/common/Button";
@@ -59,7 +61,7 @@ export function DictationPage() {
   const [mode, setMode] = useState<DictationMode>("push_to_talk");
   const [level, setLevel] = useState(0);
   const [testing, setTesting] = useState(false);
-  const [saved, setSaved] = useState(false);
+  const [loaded, setLoaded] = useState(false);
   const [newMapping, setNewMapping] = useState({ processName: "", style: "developer" as CleanupStyle });
 
   const errors = useMemo(() => validateSettings(settings), [settings]);
@@ -70,6 +72,7 @@ export function DictationPage() {
       setSettings(stored);
       setMode(stored.defaultMode);
       setMicrophones(devices);
+      setLoaded(true);
     });
   }, []);
 
@@ -86,13 +89,14 @@ export function DictationPage() {
   const update = <K extends keyof AppSettings>(key: K, value: AppSettings[K]) =>
     setSettings((current) => ({ ...current, [key]: value }));
 
-  const save = async () => {
-    if (!valid) return;
-    const stored = await native.saveSettings(settings);
-    setSettings(stored);
-    setSaved(true);
-    window.setTimeout(() => setSaved(false), 2000);
-  };
+  const saveState = useAutoSave(settings, {
+    ready: loaded,
+    valid,
+    persist: async (next) => {
+      const stored = await native.settings();
+      await native.saveSettings({ ...next, lastPage: stored.lastPage });
+    },
+  });
 
   const stereoMixAvailable = microphones.some((name) => /stereo mix|virtual|cable|loopback/i.test(name));
   const activeMode = MODES.find((entry) => entry.id === mode) ?? MODES[0];
@@ -102,7 +106,7 @@ export function DictationPage() {
       <header className="page-header">
         <h1>Dictation</h1>
         <p className="page-header__meta">
-          <span>Recording modes, input devices, cleanup behaviour, and insertion.</span>
+          <span>Recording modes, input devices, cleanup behaviour, and insertion. Changes save automatically.</span>
         </p>
       </header>
 
@@ -133,7 +137,7 @@ export function DictationPage() {
         />
       </SettingsSection>
 
-      <SettingsSection title="Shortcuts" description="Changes take effect as soon as you save.">
+      <SettingsSection title="Shortcuts" description="New shortcuts take effect immediately.">
         {SHORTCUT_LABELS.map((entry) => (
           <SettingsRow
             key={entry.id}
@@ -474,11 +478,7 @@ export function DictationPage() {
         />
       </SettingsSection>
 
-      <div className="command-row">
-        <Button variant="primary" disabled={!valid} onClick={() => void save()}>
-          {saved ? "Saved" : "Save changes"}
-        </Button>
-      </div>
+      <SaveIndicator state={saveState} />
     </div>
   );
 }

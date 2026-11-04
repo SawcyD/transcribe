@@ -21,7 +21,7 @@
 .app-shell--compact { grid-template-columns: 60px minmax(0, 1fr); }
 .navigation-pane { padding: 0 10px 12px; background: transparent; border-right: 1px solid var(--vf-stroke); }
 .app-identity { gap: 10px; min-height: 56px; padding: 0 8px; border-bottom: 0; font-size: 14px; }
-.app-identity svg { box-sizing: content-box; padding: 6px; color: var(--memora-accent-usable); border-radius: 9px; background: var(--vf-accent-soft); }
+.app-identity > svg { box-sizing: content-box; padding: 6px; color: var(--memora-accent-usable); border-radius: 9px; background: var(--vf-accent-soft); }
 .app-identity strong { font-weight: 650; letter-spacing: -.01em; }
 .navigation-pane .memora-navigation { padding-top: 4px; }
 .navigation-pane .memora-tooltip-anchor, .navigation-pane .memora-tooltip-anchor > div { display: block; width: 100%; }
@@ -104,10 +104,99 @@ kbd, .shortcut-chip kbd { min-width: 26px; height: 24px; padding: 0 8px; border-
 @media (prefers-reduced-motion: no-preference) {
   .page { animation: vf-page-in 180ms cubic-bezier(.2, 0, 0, 1) both; }
 }
-@keyframes vf-page-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+/* Opacity only: an animated transform would make .page the containing block
+   for position:fixed children (the save pill) and push them off-screen. */
+@keyframes vf-page-in { from { opacity: 0; } to { opacity: 1; } }
 
-/* Data-heavy pages (History's list + detail) get a wider column. */
-.page:has(.history-shell) { width: min(1240px, calc(100% - 64px)); }
-.voiceflow-command-bar > :last-child { white-space: nowrap; }
-.history-shell { grid-template-columns: minmax(0, 1.5fr) minmax(320px, 1fr); gap: 14px; }
-@media (max-width: 1100px) { .history-shell { grid-template-columns: 1fr; } }
+/* --- History: searchable list + reading pane --- */
+.page:has(.history-shell) { width: min(1180px, calc(100% - 64px)); }
+.history-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 12px; margin-bottom: 16px; }
+.history-toolbar__search { flex: 1 1 260px; max-width: 380px; }
+.history-toolbar__search .memora-search-box { width: 100%; }
+.history-toolbar__filters { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.history-toolbar__count { margin-left: auto; color: var(--memora-text-secondary); font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.filter-pill { height: 30px; padding: 0 28px 0 12px; color: var(--memora-text); background: var(--memora-control) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' fill='none' stroke='%23999' stroke-width='1.5'%3E%3Cpath d='M1 1l4 4 4-4'/%3E%3C/svg%3E") no-repeat right 11px center; border: 1px solid var(--vf-stroke); border-radius: 999px; font-size: 12.5px; appearance: none; cursor: pointer; }
+.filter-pill:hover { background-color: var(--memora-control-hover); }
+.filter-pill[data-active="true"] { color: var(--memora-text); background-color: var(--vf-accent-soft); border-color: color-mix(in srgb, var(--memora-accent-usable) 45%, transparent); }
+.text-button { display: inline-flex; align-items: center; gap: 4px; min-height: 28px; padding: 0 10px; color: var(--memora-accent-usable); background: transparent; border: 0; border-radius: 999px; font-size: 12.5px; font-weight: 550; cursor: pointer; }
+.text-button:hover { background: var(--vf-accent-soft); }
+
+.history-shell { display: grid; grid-template-columns: minmax(300px, 380px) minmax(0, 1fr); gap: 16px; align-items: start; }
+.history-list { overflow: hidden; border: 1px solid var(--vf-stroke); border-radius: var(--memora-radius-lg); background: var(--vf-card); }
+.history-scroll { max-height: calc(100vh - 210px); overflow-y: auto; padding: 4px; }
+.history-group { position: static; margin: 0; padding: 12px 12px 6px; color: var(--memora-text-secondary); background: transparent; border: 0; font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; }
+.history-item { display: grid; gap: 4px; width: 100%; padding: 10px 12px; color: var(--memora-text); text-align: left; background: transparent; border: 0; border-radius: 10px; cursor: pointer; transition: background-color 100ms; }
+.history-item + .history-item { margin-top: 2px; }
+.history-item:hover { background: var(--memora-subtle-hover); }
+.history-item--active, .history-item--active:hover { background: var(--vf-accent-soft); }
+.history-item--active::before { display: none; }
+.history-item__top { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.history-item__top b { overflow: hidden; font-size: 13px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.history-item__top time { margin-left: auto; flex: 0 0 auto; color: var(--memora-text-secondary); font-size: 12px; font-variant-numeric: tabular-nums; }
+.history-item__excerpt { display: -webkit-box; overflow: hidden; color: var(--memora-text); font-size: 12.5px; line-height: 1.45; opacity: .86; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.history-item__meta { display: block; color: var(--memora-text-tertiary); font-size: 11.5px; }
+.history-scroll .empty-state { margin: 8px; }
+
+.status-chip { flex: 0 0 auto; padding: 1px 8px; border-radius: 999px; font-size: 11px; font-weight: 600; line-height: 18px; background: var(--memora-control); color: var(--memora-text-secondary); }
+.status-chip--inserted { color: var(--memora-success); background: color-mix(in srgb, var(--memora-success) 14%, transparent); }
+.status-chip--copied { color: var(--memora-warning); background: color-mix(in srgb, var(--memora-warning) 14%, transparent); }
+.status-chip--failed { color: var(--memora-danger); background: color-mix(in srgb, var(--memora-danger) 14%, transparent); }
+
+.history-detail { position: sticky; top: 16px; padding: 20px 22px; border: 1px solid var(--vf-stroke); }
+.history-detail__header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 14px; }
+.history-detail__header h2 { font-size: 18px; font-weight: 650; letter-spacing: -.01em; }
+.history-detail__header p { margin-top: 3px; color: var(--memora-text-secondary); font-size: 12.5px; }
+.history-detail__actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 18px; }
+.icon-button { display: inline-grid; place-items: center; width: 32px; height: 32px; margin-left: auto; color: var(--memora-text-secondary); background: transparent; border: 0; border-radius: 999px; cursor: pointer; }
+.icon-button:hover { color: var(--memora-text); background: var(--memora-subtle-hover); }
+.icon-button--danger:hover { color: var(--memora-danger); background: color-mix(in srgb, var(--memora-danger) 12%, transparent); }
+.history-detail .transcript-paper { min-height: 160px; margin: 12px 0 16px; padding: 16px 18px; border-radius: 12px; font-size: 14px; line-height: 1.6; white-space: pre-wrap; }
+.history-detail .metadata-list { grid-template-columns: repeat(2, minmax(0, 1fr)); margin-bottom: 0; padding: 14px 0 0; border-bottom: 0; }
+@media (max-width: 860px) { .history-shell { grid-template-columns: 1fr; } .history-detail { position: static; } .history-scroll { max-height: 340px; } }
+
+/* --- Auto-save confirmation pill --- */
+.save-indicator { position: fixed; z-index: 20; bottom: 22px; left: 50%; display: inline-flex; align-items: center; gap: 8px; padding: 8px 14px; color: var(--memora-text); background: color-mix(in srgb, var(--memora-acrylic) 85%, transparent); border: 1px solid var(--vf-stroke); border-radius: 999px; box-shadow: var(--memora-shadow-flyout); backdrop-filter: blur(20px); font-size: 12.5px; font-weight: 550; opacity: 0; pointer-events: none; transform: translate(-50%, 8px); transition: opacity 160ms, transform 160ms; }
+.save-indicator--visible { opacity: 1; transform: translate(-50%, 0); }
+.save-indicator--success svg { color: var(--memora-success); }
+.save-indicator--error { border-color: color-mix(in srgb, var(--memora-danger) 50%, transparent); }
+.save-indicator--error svg { color: var(--memora-danger); }
+.save-indicator__spin { animation: spin 800ms linear infinite; }
+
+/* --- Sidebar: header with its own collapse control, footer pinned to the bottom --- */
+.navigation-pane { display: flex; flex-direction: column; height: 100vh; }
+.app-identity { position: relative; }
+.sidebar-toggle { display: grid; place-items: center; width: 30px; height: 30px; margin-left: auto; padding: 0; color: var(--memora-text-secondary); background: transparent; border: 0; border-radius: 8px; cursor: pointer; }
+.sidebar-toggle:hover { color: var(--memora-text); background: var(--memora-subtle-hover); }
+.navigation-pane .memora-navigation { flex: 1 1 auto; width: 100%; min-height: 0; }
+.navigation-pane .memora-navigation > .memora-icon-button { display: none; }
+.navigation-pane .memora-navigation__footer { margin-top: auto; }
+.app-shell--compact .navigation-pane { padding-inline: 6px; }
+.app-shell--compact .app-identity { flex-direction: column; justify-content: center; gap: 6px; min-height: 92px; padding: 10px 0 4px; }
+.app-shell--compact .app-identity strong { display: none; }
+.app-shell--compact .sidebar-toggle { margin-left: 0; }
+.app-shell--compact .navigation-pane .memora-navigation { width: 100%; }
+.app-shell--compact .navigation-pane .memora-nav-item { justify-content: center; padding-inline: 0; }
+/* Centre the save pill on the content area, not the whole window. */
+.app-shell .save-indicator { left: calc(50% + 118px); }
+.app-shell--compact .save-indicator { left: calc(50% + 30px); }
+
+/* --- Home: recent activity shows what was said, not just a word count --- */
+.section-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.section-heading .text-button { margin: -6px 0 2px; }
+.activity-row { grid-template-columns: 72px minmax(0, 1fr) auto; align-items: center; }
+.activity-row__body { display: grid; gap: 2px; min-width: 0; }
+.activity-row__app { font-weight: 600; }
+.activity-row__excerpt { overflow: hidden; color: var(--memora-text-secondary); font-size: 12.5px; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Free-form content inside a settings card (e.g. Dictation's mode tabs) gets
+   the same inset as rows instead of touching the card edge. */
+.memora-settings-section > :not(.memora-settings-row):not(.voiceflow-settings-row-button) { margin: 14px 18px; }
+.memora-settings-section > .segmented + * { margin-top: -4px; color: var(--memora-text-secondary); font-size: 12.5px; }
+
+/* Inline actions read as quiet buttons rather than underlined web links. */
+.link-button { min-height: 26px; padding: 0 9px; color: var(--memora-accent-usable); border-radius: 999px; font-size: 12.5px; font-weight: 550; text-decoration: none; }
+.link-button:hover { color: var(--memora-accent-usable); background: var(--vf-accent-soft); }
+.shortcut-recorder { gap: 4px; }
+.shortcut-recorder__field { display: inline-flex; align-items: center; justify-content: center; min-height: 32px; border-radius: 9px; }
+/* A settings group that follows other content always gets breathing room. */
+* + .voiceflow-settings-group { margin-top: 28px; }
