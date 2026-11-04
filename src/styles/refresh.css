@@ -1,0 +1,113 @@
+/*
+ * Main-window refresh — same language as the recording dock: soft rounded
+ * surfaces, quiet hairline borders, generous spacing, and the accent used only
+ * for state. Loaded after global.css so it overrides the older layers without
+ * touching overlay/buddy/assistant windows.
+ */
+
+/* Rounder Memora primitives everywhere (buttons, inputs, sections, nav). */
+.memora-ui-root[data-memora-theme] {
+  --memora-radius-lg: 14px;
+  --memora-radius-md: 9px;
+  --memora-radius-sm: 6px;
+  --vf-card: color-mix(in srgb, var(--memora-card) 100%, transparent);
+  --vf-card-hover: color-mix(in srgb, var(--memora-text) 4%, var(--memora-card));
+  --vf-stroke: var(--memora-stroke);
+  --vf-accent-soft: color-mix(in srgb, var(--memora-accent-usable) 16%, transparent);
+}
+
+/* --- Shell --- */
+.app-shell { grid-template-columns: 236px minmax(0, 1fr); background: color-mix(in srgb, var(--memora-layer) 90%, #161719); }
+.app-shell--compact { grid-template-columns: 60px minmax(0, 1fr); }
+.navigation-pane { padding: 0 10px 12px; background: transparent; border-right: 1px solid var(--vf-stroke); }
+.app-identity { gap: 10px; min-height: 56px; padding: 0 8px; border-bottom: 0; font-size: 14px; }
+.app-identity svg { box-sizing: content-box; padding: 6px; color: var(--memora-accent-usable); border-radius: 9px; background: var(--vf-accent-soft); }
+.app-identity strong { font-weight: 650; letter-spacing: -.01em; }
+.navigation-pane .memora-navigation { padding-top: 4px; }
+.navigation-pane .memora-tooltip-anchor, .navigation-pane .memora-tooltip-anchor > div { display: block; width: 100%; }
+.navigation-pane .memora-nav-item { min-height: 38px; padding-inline: 12px; border-radius: 10px; font-size: 13.5px; transition: background-color 120ms, color 120ms; }
+.navigation-pane .memora-nav-item:hover { background: var(--memora-subtle-hover); }
+.navigation-pane .memora-nav-item--selected { color: var(--memora-text); background: var(--vf-accent-soft); font-weight: 600; }
+.navigation-pane .memora-nav-item--selected .memora-nav-item__icon { color: var(--memora-accent-usable); }
+.navigation-pane .memora-nav-item__indicator { display: none; }
+.navigation-pane .memora-navigation__footer { border-top: 1px solid var(--vf-stroke); padding-top: 8px; }
+.content-frame { background: transparent; scrollbar-gutter: stable; }
+
+/* --- Page column: centred, readable width instead of hugging the left edge --- */
+.page { width: min(860px, calc(100% - 64px)); margin: 0 auto; padding: 36px 0 64px; }
+.page-header { margin-bottom: 26px; }
+.page-header h1 { margin-bottom: 6px; font-family: var(--memora-font-display); font-size: 26px; font-weight: 650; letter-spacing: -.02em; }
+.page-header p, .page-header__meta { color: var(--memora-text-secondary); font-size: 13px; line-height: 1.5; }
+.page-header__meta { gap: 6px 10px; margin-top: 8px; }
+/* Status chips only where the meta line holds several facts (Home). */
+.page-header__meta:has(> :nth-child(2)) > * { padding: 3px 10px; border-radius: 999px; background: var(--memora-control); }
+@media (max-width: 900px) { .page { width: calc(100% - 40px); margin: 0 auto; } }
+
+/* --- Settings groups: label above a single rounded card of rows --- */
+.voiceflow-settings-group, .settings-group { margin: 0 0 28px; }
+.voiceflow-settings-group__title, .settings-group__title {
+  margin: 0 0 8px 4px;
+  color: var(--memora-text-secondary);
+  font: 600 11.5px/16px var(--memora-font);
+  letter-spacing: .06em;
+  text-transform: uppercase;
+}
+.voiceflow-settings-group__description { margin: -2px 0 10px 4px; font-size: 12.5px; line-height: 1.45; }
+.memora-settings-section { border: 1px solid var(--vf-stroke); border-radius: var(--memora-radius-lg); background: var(--vf-card); box-shadow: 0 1px 2px rgb(0 0 0 / .12); }
+.memora-settings-row { min-height: 62px; gap: 20px; padding: 13px 18px; transition: background-color 120ms; }
+.memora-settings-row:last-child { border-bottom: 0; }
+.memora-settings-row:hover { background: var(--memora-subtle-hover); }
+.memora-settings-row__title { font-size: 13.5px; font-weight: 500; }
+.memora-settings-row__description { margin-top: 2px; color: var(--memora-text-secondary); font-size: 12.5px; line-height: 1.45; }
+
+/* --- Controls --- */
+.memora-button, .voiceflow-button { display: inline-flex; align-items: center; gap: 8px; min-height: 32px; padding-inline: 14px; border-radius: 999px; font-weight: 550; }
+.memora-button--primary { box-shadow: 0 1px 0 rgb(255 255 255 / .12) inset, 0 4px 14px color-mix(in srgb, var(--memora-accent-usable) 25%, transparent); }
+.memora-button svg { flex: 0 0 auto; }
+.memora-combo-box, .settings-combo, .settings-input, .numeric-field input, .memora-search-box, .memora-number-box { border-radius: 9px; }
+.voiceflow-toggle { gap: 8px; }
+kbd, .shortcut-chip kbd { min-width: 26px; height: 24px; padding: 0 8px; border-radius: 7px; background: var(--memora-control); box-shadow: inset 0 -1px 0 rgb(0 0 0 / .25), inset 0 0 0 1px var(--vf-stroke); font-size: 11.5px; }
+.shortcut-chip { gap: 5px; }
+.memora-info-bar { border-radius: var(--memora-radius-lg); }
+.segmented { padding: 3px; border-radius: 999px; }
+.segmented__item { min-height: 28px; padding: 0 14px; border-radius: 999px; }
+.segmented__item--selected { background: var(--vf-accent-soft); box-shadow: none; color: var(--memora-text); font-weight: 600; }
+.memora-search-box, .search-field { min-height: 32px; border-radius: 999px; }
+
+/* --- Home: the status panel becomes a hero card --- */
+.page > .memora-info-bar, .page > .info-bar { margin-bottom: 16px; }
+/* Grouped rows (Home shortcuts, recent activity) read as one card, like Settings. */
+.settings-group__rows { gap: 0; overflow: hidden; border: 1px solid var(--vf-stroke); border-radius: var(--memora-radius-lg); background: var(--vf-card); }
+.settings-group__rows > .settings-row { min-height: 58px; padding: 12px 18px; border: 0; border-bottom: 1px solid var(--vf-stroke); border-radius: 0; background: transparent; }
+.settings-group__rows > .settings-row:last-child { border-bottom: 0; }
+.status-panel { margin-bottom: 28px; padding: 22px 24px; border: 1px solid var(--vf-stroke); border-radius: 18px; background: linear-gradient(135deg, color-mix(in srgb, var(--memora-accent-usable) 9%, var(--vf-card)), var(--vf-card) 60%); box-shadow: 0 1px 2px rgb(0 0 0 / .12); }
+.status-panel .memora-section-header { margin-bottom: 6px; font-size: 11.5px; letter-spacing: .06em; text-transform: uppercase; }
+.status-panel__headline { font-size: 28px; font-weight: 600; line-height: 34px; }
+.status-panel__detail { font-size: 13px; color: var(--memora-text-secondary); }
+.voiceflow-status-rows { gap: 4px; margin-top: 16px; }
+.command-row--secondary { margin-top: 0; margin-bottom: 28px; gap: 8px; }
+.empty-state { border: 1px dashed var(--vf-stroke); border-radius: var(--memora-radius-lg); background: transparent; }
+
+/* --- Lists, history, dictionary, transforms --- */
+.voiceflow-command-bar, .history-list, .history-detail, .memora-data-grid-wrap, .transform-card, .dictionary-group, .workspace__pane textarea, .workspace__preview, .transcript-paper, .diff-view {
+  border-color: var(--vf-stroke);
+  border-radius: var(--memora-radius-lg);
+}
+.voiceflow-command-bar { padding: 6px; background: var(--vf-card); }
+.history-detail { background: var(--vf-card); }
+.memora-data-grid th { color: var(--memora-text-secondary); font-size: 12px; font-weight: 600; }
+.memora-data-grid tbody tr { transition: background-color 120ms; }
+.memora-data-grid tbody tr:hover { background: var(--memora-subtle-hover); }
+.memora-dialog { border-radius: 18px; }
+
+/* Calm entrance when switching pages; reduced-motion users get none. */
+@media (prefers-reduced-motion: no-preference) {
+  .page { animation: vf-page-in 180ms cubic-bezier(.2, 0, 0, 1) both; }
+}
+@keyframes vf-page-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+
+/* Data-heavy pages (History's list + detail) get a wider column. */
+.page:has(.history-shell) { width: min(1240px, calc(100% - 64px)); }
+.voiceflow-command-bar > :last-child { white-space: nowrap; }
+.history-shell { grid-template-columns: minmax(0, 1.5fr) minmax(320px, 1fr); gap: 14px; }
+@media (max-width: 1100px) { .history-shell { grid-template-columns: 1fr; } }
