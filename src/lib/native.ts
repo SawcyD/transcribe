@@ -133,6 +133,7 @@ export const native = {
   history: (query = "") => call<TranscriptRecord[]>("list_transcripts", { query }, []),
   transcript: (id: string) => call<TranscriptRecord>("get_transcript", { id }),
   deleteTranscript: (id: string) => call<void>("delete_transcript", { id }),
+  setTranscriptFavorite: (id: string, favorite: boolean) => call<void>("set_transcript_favorite", { id, favorite }),
   copyText: (text: string) => call<void>("copy_text", { text }),
   pasteTranscript: (id: string) => call<void>("paste_transcript", { id }),
   pasteLatestTranscript: () => call<void>("paste_latest_transcript"),

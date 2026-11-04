@@ -1,5 +1,5 @@
 import { Check, FileText, X } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useAppStore } from "../app/useAppStore";
 import { native } from "../lib/native";
 import { AudioVisualizer } from "./AudioVisualizer";
@@ -13,6 +13,10 @@ function elapsed(startedAt: string | null | undefined): string {
   const seconds = Math.max(0, Math.floor((Date.now() - new Date(startedAt).getTime()) / 1000));
   return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
 }
+
+/** Visualizer bars are 0–1 above the noise floor; below this is silence. */
+const SOUND_THRESHOLD = 0.08;
+const SILENCE_HINT_MS = 3_000;
 
 export function RecordingOverlay() {
   const { dictation, audio } = useAppStore();
@@ -36,6 +40,21 @@ export function RecordingOverlay() {
   }, [presentation.showTimer]);
 
   const caption = presentation.showCaption ? captionTail(dictation.interimTranscript ?? "") : "";
+
+  // "Can't hear you": the mic has been effectively silent for a while and
+  // nothing has been transcribed — usually a muted headset or wrong input.
+  const lastSoundAt = useRef(Date.now());
+  useEffect(() => {
+    lastSoundAt.current = Date.now();
+  }, [sessionId]);
+  if (Math.max(0, ...(audio?.bars ?? [])) > SOUND_THRESHOLD) lastSoundAt.current = Date.now();
+  const silent =
+    presentation.tone === "listening" &&
+    !caption &&
+    Date.now() - lastSoundAt.current > SILENCE_HINT_MS &&
+    Date.now() - new Date(dictation.startedAt ?? Date.now()).getTime() > SILENCE_HINT_MS;
+  const label = silent ? "Can't hear you" : presentation.label;
+  const detail = silent ? "Check your microphone" : presentation.detail;
   const showWaveform = presentation.showWaveform && settings.showWaveform;
 
   return (
@@ -57,8 +76,8 @@ export function RecordingOverlay() {
           </span>
         ) : (
           <span className="overlay-line" data-tauri-drag-region>
-            <span className="overlay-label">{presentation.label}</span>
-            {presentation.detail && <span className="overlay-detail">{presentation.detail}</span>}
+            <span className="overlay-label">{label}</span>
+            {detail && <span className="overlay-detail">{detail}</span>}
           </span>
         )}
       </div>

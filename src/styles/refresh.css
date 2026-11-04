@@ -147,7 +147,7 @@ kbd, .shortcut-chip kbd { min-width: 26px; height: 24px; padding: 0 8px; border-
 .history-detail__header h2 { font-size: 18px; font-weight: 650; letter-spacing: -.01em; }
 .history-detail__header p { margin-top: 3px; color: var(--memora-text-secondary); font-size: 12.5px; }
 .history-detail__actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 18px; }
-.icon-button { display: inline-grid; place-items: center; width: 32px; height: 32px; margin-left: auto; color: var(--memora-text-secondary); background: transparent; border: 0; border-radius: 999px; cursor: pointer; }
+.icon-button { display: inline-grid; place-items: center; width: 32px; height: 32px; margin-left: 0; color: var(--memora-text-secondary); background: transparent; border: 0; border-radius: 999px; cursor: pointer; }
 .icon-button:hover { color: var(--memora-text); background: var(--memora-subtle-hover); }
 .icon-button--danger:hover { color: var(--memora-danger); background: color-mix(in srgb, var(--memora-danger) 12%, transparent); }
 .history-detail .transcript-paper { min-height: 160px; margin: 12px 0 16px; padding: 16px 18px; border-radius: 12px; font-size: 14px; line-height: 1.6; white-space: pre-wrap; }
@@ -200,3 +200,19 @@ kbd, .shortcut-chip kbd { min-width: 26px; height: 24px; padding: 0 8px; border-
 .shortcut-recorder__field { display: inline-flex; align-items: center; justify-content: center; min-height: 32px; border-radius: 9px; }
 /* A settings group that follows other content always gets breathing room. */
 * + .voiceflow-settings-group { margin-top: 28px; }
+
+/* --- History extras: stars, quick-add, export --- */
+.icon-button--push { margin-left: auto; }
+.history-detail__badges { display: flex; align-items: center; gap: 6px; }
+.star-button--on, .star-button--on:hover { color: #f5c542; }
+.star-button--on svg { fill: currentColor; }
+.history-item__star { flex: 0 0 auto; color: #f5c542; fill: currentColor; }
+.text-button:disabled { opacity: .45; cursor: default; background: transparent; }
+.dictionary-quick-add { width: 100%; margin-top: 12px; height: 34px; padding: 0 12px; }
+
+/* --- Home: today at a glance --- */
+.stat-tiles { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin: -12px 0 28px; }
+.stat-tile { display: grid; gap: 2px; padding: 14px 16px; border: 1px solid var(--vf-stroke); border-radius: var(--memora-radius-lg); background: var(--vf-card); }
+.stat-tile__value { font-family: var(--memora-font-display); font-size: 22px; font-weight: 650; font-variant-numeric: tabular-nums; letter-spacing: -.01em; }
+.stat-tile__label { color: var(--memora-text-secondary); font-size: 12px; }
+@media (max-width: 760px) { .stat-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); } }

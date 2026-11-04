@@ -7,6 +7,7 @@ import { Button } from "../components/common/Button";
 import { InfoBar } from "../components/fluent/InfoBar";
 import { StatusIndicator } from "../components/fluent/StatusIndicator";
 import { native } from "../lib/native";
+import { computeHomeStats, formatMinutes, TYPING_WPM, type HomeStats } from "./homeStats";
 import type { AppSettings, CredentialStatus, DictationSnapshot, TranscriptRecord } from "../types/models";
 
 const SHORTCUTS = [
@@ -55,6 +56,7 @@ export function HomePage() {
   const [settings, setSettings] = useState<AppSettings | null>(null);
   const [credentials, setCredentials] = useState<CredentialStatus>({ deepgram: false, cleanup: false, assistant: false });
   const [recent, setRecent] = useState<TranscriptRecord[]>([]);
+  const [stats, setStats] = useState<HomeStats | null>(null);
   const [, forceTick] = useState(0);
 
   useEffect(() => {
@@ -63,6 +65,7 @@ export function HomePage() {
         setSettings(nextSettings);
         setCredentials(nextCredentials);
         setRecent(transcripts.slice(0, 5));
+        setStats(computeHomeStats(transcripts));
       },
     );
   }, [dictation.state]);
@@ -132,6 +135,27 @@ export function HomePage() {
           <InfoRow label="Cleanup" value={settings?.cleanupEnabled ? settings.cleanupStyle : "Off"} />
         </div>
       </section>
+
+      {stats && stats.wordsAllTime > 0 && (
+        <section className="stat-tiles" aria-label="Today">
+          <div className="stat-tile">
+            <span className="stat-tile__value">{stats.wordsToday.toLocaleString()}</span>
+            <span className="stat-tile__label">words today</span>
+          </div>
+          <div className="stat-tile">
+            <span className="stat-tile__value">{stats.dictationsToday}</span>
+            <span className="stat-tile__label">{stats.dictationsToday === 1 ? "dictation" : "dictations"} today</span>
+          </div>
+          <div className="stat-tile" title={`Compared with typing at ${TYPING_WPM} words per minute`}>
+            <span className="stat-tile__value">{formatMinutes(stats.minutesSavedToday)}</span>
+            <span className="stat-tile__label">saved vs typing</span>
+          </div>
+          <div className="stat-tile">
+            <span className="stat-tile__value">{stats.streakDays}</span>
+            <span className="stat-tile__label">day streak</span>
+          </div>
+        </section>
+      )}
 
       <section className="settings-group" aria-label="Shortcuts">
         <h2 className="settings-group__title">Shortcuts</h2>

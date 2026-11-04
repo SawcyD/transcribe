@@ -1,4 +1,4 @@
-import { Check, ClipboardCopy, RotateCcw, Trash2, Wand2, X } from "lucide-react";
+import { BookPlus, Check, ClipboardCopy, Download, RotateCcw, Star, Trash2, Wand2, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { SearchBox } from "@memora/ui";
@@ -6,12 +6,12 @@ import { Button } from "../components/common/Button";
 import { ContentDialog } from "../components/fluent/ContentDialog";
 import { native } from "../lib/native";
 import type { AppSettings, TranscriptRecord } from "../types/models";
-import { filterHistory } from "./historyFilter";
+import { filterHistory, historyToMarkdown } from "./historyFilter";
 
 type Stage = "finalTranscript" | "cleanedTranscript" | "normalizedTranscript" | "rawTranscript";
 type ModeFilter = "all" | TranscriptRecord["mode"];
 type DateFilter = "any" | "today" | "week" | "month";
-type StatusFilter = "all" | TranscriptRecord["insertionStatus"];
+type StatusFilter = "all" | "starred" | TranscriptRecord["insertionStatus"];
 
 const STAGES: Array<{ id: Stage; label: string }> = [
   { id: "finalTranscript", label: "Final" },
@@ -81,7 +81,23 @@ export function HistoryPage() {
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [suppressPasteConfirm, setSuppressPasteConfirm] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [dictionaryTerm, setDictionaryTerm] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
+  const pageRef = useRef<HTMLDivElement>(null);
+  const termInputRef = useRef<HTMLInputElement>(null);
+  const dictionaryOpen = dictionaryTerm !== null;
+
+  // The dialog mounts in a portal, so autoFocus is unreliable; focus and
+  // select the prefilled term once it opens so Enter saves straight away.
+  useEffect(() => {
+    if (!dictionaryOpen) return;
+    const id = window.setTimeout(() => {
+      termInputRef.current?.focus();
+      termInputRef.current?.select();
+    }, 30);
+    return () => window.clearTimeout(id);
+  }, [dictionaryOpen]);
 
   const load = async () => {
     const [next, stored] = await Promise.all([native.history(), native.settings()]);
@@ -114,7 +130,8 @@ export function HistoryPage() {
         (record) =>
           (modeFilter === "all" || record.mode === modeFilter) &&
           (appFilter === "all" || (record.applicationName ?? "Unknown app") === appFilter) &&
-          (statusFilter === "all" || record.insertionStatus === statusFilter) &&
+          (statusFilter === "all" ||
+            (statusFilter === "starred" ? record.isFavorite : record.insertionStatus === statusFilter)) &&
           withinRange(record.createdAt, dateFilter),
       ),
     [records, query, modeFilter, appFilter, statusFilter, dateFilter],
@@ -151,6 +168,86 @@ export function HistoryPage() {
     setStatusFilter("all");
   };
 
+  const flash = (message: string) => {
+    setNotice(message);
+    window.setTimeout(() => setNotice((current) => (current === message ? null : current)), 1800);
+  };
+
+  const toggleFavorite = async (record: TranscriptRecord) => {
+    const favorite = !record.isFavorite;
+    // Optimistic: the star flips immediately; a failure reloads the truth.
+    setRecords((current) => current.map((item) => (item.id === record.id ? { ...item, isFavorite: favorite } : item)));
+    try {
+      await native.setTranscriptFavorite(record.id, favorite);
+    } catch {
+      void load();
+    }
+  };
+
+  const exportMarkdown = () => {
+    const url = URL.createObjectURL(new Blob([historyToMarkdown(filtered)], { type: "text/markdown" }));
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = `voiceflow-dictations-${new Date().toISOString().slice(0, 10)}.md`;
+    anchor.click();
+    URL.revokeObjectURL(url);
+  };
+
+  /** Pre-fills the dictionary dialog with whatever the user highlighted. */
+  const openAddToDictionary = () => {
+    const selection = window.getSelection()?.toString().trim() ?? "";
+    setDictionaryTerm(selection.split(/\s+/).length <= 4 ? selection : "");
+  };
+
+  const saveDictionaryTerm = async () => {
+    const term = dictionaryTerm?.trim();
+    if (!term) return;
+    // The backend requires at least one spoken form; the lowercase term is
+    // what the dictionary page itself defaults to.
+    try {
+      await native.saveDictionaryEntry(null, {
+        displayTerm: term,
+        spokenForms: [term.toLowerCase()],
+        replacement: null,
+        category: "vocabulary",
+        priority: 100,
+        caseSensitive: false,
+        wholeWordOnly: true,
+        enabled: true,
+      });
+    } catch (cause) {
+      flash(cause instanceof Error ? cause.message : "Couldn't add that word");
+      return;
+    }
+    setDictionaryTerm(null);
+    flash(`Added “${term}” to your dictionary`);
+  };
+
+  // Page shortcuts: Ctrl+F search, Ctrl+C copy (when no text is highlighted),
+  // S star, Delete remove. Ignored while typing in a field.
+  useEffect(() => {
+    const onKey = (event: globalThis.KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      const typing = target?.closest("input, textarea, select, [contenteditable=true]");
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "f") {
+        event.preventDefault();
+        pageRef.current?.querySelector<HTMLInputElement>(".history-toolbar input")?.focus();
+        return;
+      }
+      if (typing || !selected || confirmingDelete || confirmingPaste || dictionaryTerm !== null) return;
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "c" && !window.getSelection()?.toString()) {
+        event.preventDefault();
+        void copySelected();
+      } else if (event.key === "Delete") {
+        setConfirmingDelete(true);
+      } else if (event.key.toLowerCase() === "s" && !event.ctrlKey && !event.metaKey && !event.altKey) {
+        void toggleFavorite(selected);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  });
+
   const copySelected = async () => {
     if (!selected) return;
     await native.copyText(selected.finalTranscript);
@@ -170,11 +267,11 @@ export function HistoryPage() {
   };
 
   return (
-    <div className="page">
+    <div className="page" ref={pageRef}>
       <header className="page-header">
         <h1>History</h1>
         <p className="page-header__meta">
-          <span>Every locally stored transcript and its processing stages.</span>
+          <span>Everything you've dictated, stored only on this PC. Star the ones you want to keep forever.</span>
         </p>
       </header>
 
@@ -207,6 +304,7 @@ export function HistoryPage() {
           </select>
           <select className="filter-pill" aria-label="Filter by status" value={statusFilter} data-active={statusFilter !== "all"} onChange={(event) => setStatusFilter(event.target.value as StatusFilter)}>
             <option value="all">Any status</option>
+            <option value="starred">★ Starred</option>
             {Object.entries(STATUS_LABELS).map(([id, label]) => (
               <option key={id} value={id}>
                 {label}
@@ -222,6 +320,9 @@ export function HistoryPage() {
         <small className="history-toolbar__count">
           {filtered.length === records.length ? `${records.length} total` : `${filtered.length} of ${records.length}`}
         </small>
+        <button type="button" className="text-button" disabled={filtered.length === 0} onClick={exportMarkdown} title="Export the transcripts shown as a Markdown file">
+          <Download size={13} aria-hidden="true" /> Export
+        </button>
       </div>
 
       <section className="history-shell">
@@ -255,6 +356,7 @@ export function HistoryPage() {
                     >
                       <span className="history-item__top">
                         <b>{record.applicationName ?? "Unknown app"}</b>
+                        {record.isFavorite && <Star size={12} className="history-item__star" aria-label="Starred" />}
                         {record.insertionStatus !== "inserted" && (
                           <span className={`status-chip status-chip--${record.insertionStatus}`}>{STATUS_LABELS[record.insertionStatus]}</span>
                         )}
@@ -284,11 +386,23 @@ export function HistoryPage() {
                     {MODE_LABELS[selected.mode]}
                   </p>
                 </div>
-                <span className={`status-chip status-chip--${selected.insertionStatus}`}>{STATUS_LABELS[selected.insertionStatus]}</span>
+                <div className="history-detail__badges">
+                  <span className={`status-chip status-chip--${selected.insertionStatus}`}>{STATUS_LABELS[selected.insertionStatus]}</span>
+                  <button
+                    type="button"
+                    className={`icon-button star-button${selected.isFavorite ? " star-button--on" : ""}`}
+                    aria-pressed={selected.isFavorite}
+                    aria-label={selected.isFavorite ? "Unstar (S)" : "Star (S)"}
+                    title={selected.isFavorite ? "Unstar · S" : "Star — starred dictations are never auto-deleted · S"}
+                    onClick={() => void toggleFavorite(selected)}
+                  >
+                    <Star size={16} />
+                  </button>
+                </div>
               </header>
 
               <div className="history-detail__actions">
-                <Button variant="primary" icon={copied ? <Check size={15} /> : <ClipboardCopy size={15} />} onClick={() => void copySelected()}>
+                <Button variant="primary" title="Copy · Ctrl+C" icon={copied ? <Check size={15} /> : <ClipboardCopy size={15} />} onClick={() => void copySelected()}>
                   {copied ? "Copied" : "Copy"}
                 </Button>
                 <Button
@@ -308,7 +422,10 @@ export function HistoryPage() {
                 >
                   Transform
                 </Button>
-                <button type="button" className="icon-button icon-button--danger" aria-label="Delete transcript" title="Delete transcript" onClick={() => setConfirmingDelete(true)}>
+                <button type="button" className="icon-button icon-button--push" aria-label="Add a word to the dictionary" title="Add a word to the dictionary (highlight it first)" onMouseDown={(event) => event.preventDefault()} onClick={openAddToDictionary}>
+                  <BookPlus size={16} />
+                </button>
+                <button type="button" className="icon-button icon-button--danger" aria-label="Delete transcript" title="Delete transcript · Del" onClick={() => setConfirmingDelete(true)}>
                   <Trash2 size={16} />
                 </button>
               </div>
@@ -379,6 +496,38 @@ export function HistoryPage() {
       </ContentDialog>
 
       <ContentDialog
+        open={dictionaryTerm !== null}
+        title="Add to dictionary"
+        primaryText="Add"
+        primaryDisabled={!dictionaryTerm?.trim()}
+        onPrimary={() => void saveDictionaryTerm()}
+        onClose={() => setDictionaryTerm(null)}
+      >
+        <p>Deepgram will be primed to recognise this word or name in future dictations.</p>
+        <input
+          className="settings-input dictionary-quick-add"
+          aria-label="Word or name"
+          placeholder="e.g. Kubernetes, Tauri, useEffect"
+          ref={termInputRef}
+          value={dictionaryTerm ?? ""}
+          onChange={(event) => setDictionaryTerm(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") {
+              event.preventDefault();
+              void saveDictionaryTerm();
+            }
+          }}
+        />
+      </ContentDialog>
+
+      {notice && (
+        <div className="save-indicator save-indicator--success save-indicator--visible" role="status">
+          <Check size={14} />
+          <span>{notice}</span>
+        </div>
+      )}
+
+      <ContentDialog
         open={confirmingDelete}
         title="Delete this transcript?"
         primaryText="Delete"
@@ -390,7 +539,10 @@ export function HistoryPage() {
         }}
         onClose={() => setConfirmingDelete(false)}
       >
-        <p>This permanently removes the transcript and all four of its stages. This cannot be undone.</p>
+        <p>
+          This permanently removes the transcript and all four of its stages. This cannot be undone.
+          {selected?.isFavorite ? " It is starred." : ""}
+        </p>
       </ContentDialog>
     </div>
   );

@@ -243,6 +243,7 @@ pub fn run() {
             commands::list_transcripts,
             commands::get_transcript,
             commands::delete_transcript,
+            commands::set_transcript_favorite,
             commands::list_dictionary_entries,
             commands::dashboard_stats,
             commands::get_settings,

@@ -70,6 +70,15 @@ pub fn delete_transcript(state: State<'_, AppState>, id: String) -> Result<(), A
 }
 
 #[tauri::command]
+pub fn set_transcript_favorite(
+    state: State<'_, AppState>,
+    id: String,
+    favorite: bool,
+) -> Result<(), AppError> {
+    state.database.set_transcript_favorite(&id, favorite)
+}
+
+#[tauri::command]
 pub fn list_dictionary_entries(
     state: State<'_, AppState>,
 ) -> Result<Vec<DictionaryEntry>, AppError> {
