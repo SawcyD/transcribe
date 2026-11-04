@@ -1,4 +1,5 @@
 import { Monitor, Send, X } from "lucide-react";
+import { ASSISTANT_VOICES, speak } from "../lib/speech";
 import { useEffect, useRef, useState } from "react";
 import { IconButton } from "@memora/ui";
 import { Button } from "../components/common/Button";
@@ -8,17 +9,6 @@ import { ToggleSwitch } from "../components/fluent/ToggleSwitch";
 import { defaultSettings, events, native } from "../lib/native";
 import type { AppSettings, AssistantConversationTurn, ScreenContext } from "../types/models";
 
-/** Voices exposed by the Windows speech synthesis engine. */
-function useVoices(): SpeechSynthesisVoice[] {
-  const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
-  useEffect(() => {
-    const read = () => setVoices(window.speechSynthesis?.getVoices() ?? []);
-    read();
-    window.speechSynthesis?.addEventListener("voiceschanged", read);
-    return () => window.speechSynthesis?.removeEventListener("voiceschanged", read);
-  }, []);
-  return voices;
-}
 
 export function AssistantPage() {
   const [settings, setSettings] = useState<AppSettings>(defaultSettings);
@@ -29,7 +19,6 @@ export function AssistantPage() {
   const [error, setError] = useState<string | null>(null);
   const [context, setContext] = useState<ScreenContext | null>(null);
   const conversation = useRef<HTMLDivElement>(null);
-  const voices = useVoices();
 
   useEffect(() => {
     void native.settings().then(setSettings);
@@ -77,12 +66,7 @@ export function AssistantPage() {
       // Screen context is deliberately single-use, so a stale capture is never
       // silently attached to a later question.
       setContext(null);
-      if (settings.buddySpeakResponses && window.speechSynthesis) {
-        const utterance = new SpeechSynthesisUtterance(answer);
-        const voice = voices.find((entry) => entry.name === settings.assistantVoice);
-        if (voice) utterance.voice = voice;
-        window.speechSynthesis.speak(utterance);
-      }
+      if (settings.buddySpeakResponses) void speak(answer);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "The assistant could not answer.");
       setStreaming("");
@@ -193,20 +177,25 @@ export function AssistantPage() {
         />
         <SettingsRow
           label="Voice"
+          description="Deepgram voice used when replies are read aloud."
           action={
+            <span className="voice-picker">
             <select
               className="settings-combo"
               aria-label="Assistant voice"
               value={settings.assistantVoice ?? ""}
               onChange={(event) => void update("assistantVoice", event.target.value || null)}
             >
-              <option value="">System default</option>
-              {voices.map((voice) => (
-                <option key={voice.name} value={voice.name}>
-                  {voice.name}
+              {ASSISTANT_VOICES.map((voice, index) => (
+                <option key={voice.id} value={index === 0 ? "" : voice.id}>
+                  {voice.label}
                 </option>
               ))}
             </select>
+            <Button variant="secondary" onClick={() => void speak("Hi! This is how I'll sound when I read answers to you.")}>
+              Preview
+            </Button>
+            </span>
           }
         />
       </SettingsSection>

@@ -8,6 +8,7 @@ mod context;
 mod database;
 mod dictation;
 mod errors;
+mod tts;
 mod insertion;
 mod models;
 mod security;
@@ -244,6 +245,7 @@ pub fn run() {
             commands::get_transcript,
             commands::delete_transcript,
             commands::set_transcript_favorite,
+            commands::speak_text,
             commands::list_dictionary_entries,
             commands::dashboard_stats,
             commands::get_settings,

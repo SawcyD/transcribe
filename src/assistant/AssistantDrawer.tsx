@@ -1,4 +1,5 @@
 import { Copy, Eye, MessageCircle, Send, Sparkles, Volume2, VolumeX, X } from "lucide-react";
+import { speak, stopSpeaking } from "../lib/speech";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { IconButton } from "@memora/ui";
 import { useEffect, useRef, useState } from "react";
@@ -14,14 +15,6 @@ function nativeErrorMessage(reason: unknown) {
   return "Buddy could not start that request. Add an Assistant API key in Settings, then try again.";
 }
 
-function speak(text: string) {
-  if (!("speechSynthesis" in window) || !text.trim()) return;
-  window.speechSynthesis.cancel();
-  const utterance = new SpeechSynthesisUtterance(text);
-  utterance.rate = 1.04;
-  utterance.pitch = 1.03;
-  window.speechSynthesis.speak(utterance);
-}
 
 export function AssistantDrawer() {
   const [context, setContext] = useState<ScreenContext | null>(null);
@@ -62,7 +55,7 @@ export function AssistantDrawer() {
           if (value.state === "completed" && completedRequest.current !== value.requestId && answerRef.current.trim()) {
             conversation.current = [...conversation.current, { role: "assistant" as const, content: answerRef.current.trim() }].slice(-12);
             completedRequest.current = value.requestId;
-            if (speakResponsesRef.current) speak(answerRef.current);
+            if (speakResponsesRef.current) void speak(answerRef.current);
           }
           setStatus(value.state);
         }
@@ -106,7 +99,7 @@ export function AssistantDrawer() {
     setSpeakResponses(next);
     const settings = await native.settings();
     await native.saveSettings({ ...settings, buddySpeakResponses: next });
-    if (!next && "speechSynthesis" in window) window.speechSynthesis.cancel();
+    if (!next) stopSpeaking();
   }
 
   const hasScreenContext = context !== null;

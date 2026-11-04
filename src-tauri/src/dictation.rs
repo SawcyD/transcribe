@@ -205,17 +205,6 @@ pub async fn finish(app: &AppHandle, state: &AppState) -> Result<DictationSnapsh
         let prompt = finish_sentence(&resolve_explicit_backtracking(
             transcription.raw_text.trim(),
         ));
-        let screen_context = if command_needs_screen_context(&prompt) {
-            match crate::context::capture_context() {
-                Ok(context) => Some(context),
-                Err(error) => {
-                    log::debug!("Buddy screen context was unavailable: {error}");
-                    None
-                }
-            }
-        } else {
-            None
-        };
         {
             let mut runtime = state.dictation.lock().await;
             runtime.machine.transition(DictationState::Cleaning)?;
@@ -223,7 +212,27 @@ pub async fn finish(app: &AppHandle, state: &AppState) -> Result<DictationSnapsh
             runtime.machine.transition(DictationState::Completed)?;
         }
         emit_snapshot(app, state).await;
+        // Hide the dock first so it isn't in the screenshot.
         hide_overlay(app);
+        // Command Mode is "explain what I'm looking at", so it always looks
+        // (the old keyword guessing missed most questions) unless the user
+        // turned screen context off. It captures the window that was focused
+        // when the shortcut was pressed, not whatever is in front now.
+        let allow_screen = state.settings.read().await.assistant_allow_screen_context;
+        let screen_context = if allow_screen {
+            tokio::time::sleep(std::time::Duration::from_millis(120)).await;
+            let target = active.target.clone();
+            match tokio::task::spawn_blocking(move || crate::context::capture_target_context(&target)).await {
+                Ok(Ok(context)) => Some(context),
+                Ok(Err(error)) => {
+                    log::debug!("screen context was unavailable: {error}");
+                    None
+                }
+                Err(_) => None,
+            }
+        } else {
+            None
+        };
         {
             let mut runtime = state.dictation.lock().await;
             runtime.machine.transition(DictationState::Idle)?;
@@ -1014,23 +1023,6 @@ fn format_call_notes(text: &str, application: &str) -> String {
 }
 
 
-fn command_needs_screen_context(prompt: &str) -> bool {
-    let normalized = prompt.to_ascii_lowercase();
-    [
-        "explain this",
-        "look at this",
-        "what am i looking at",
-        "what's on my screen",
-        "what is on my screen",
-        "summarize this",
-        "summarize this page",
-        "can you see this",
-        "debug this",
-    ]
-    .iter()
-    .any(|phrase| normalized.contains(phrase))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1054,16 +1046,6 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(settings.cleanup_style_for(Some("Code.exe")), "balanced");
-    }
-
-    #[test]
-    fn identifies_screen_aware_buddy_requests() {
-        assert!(command_needs_screen_context("Explain this screen for me."));
-        assert!(command_needs_screen_context("What am I looking at?"));
-        assert!(command_needs_screen_context("Can you summarize this page?"));
-        assert!(!command_needs_screen_context(
-            "Give me three names for a feature."
-        ));
     }
 
     #[test]
