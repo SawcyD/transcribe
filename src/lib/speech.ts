@@ -10,26 +10,22 @@ export const ASSISTANT_VOICES: Array<{ id: string; label: string }> = [
   { id: "aura-2-arcas-en", label: "Arcas (relaxed)" },
 ];
 
-let current: HTMLAudioElement | null = null;
-
 export function stopSpeaking() {
-  current?.pause();
-  current = null;
+  if (isTauri()) void native.stopSpeaking().catch(() => undefined);
   if ("speechSynthesis" in window) window.speechSynthesis.cancel();
 }
 
 /**
- * Reads text aloud with Deepgram's voice. Falls back to the system voice only
- * when Deepgram isn't reachable (no key, offline, or browser-only dev mode).
+ * Reads text aloud with Deepgram's voice on the output device chosen in
+ * Settings › Audio. Falls back to the system voice only when Deepgram isn't
+ * reachable (no key, offline, or browser-only dev mode).
  */
 export async function speak(text: string): Promise<void> {
   if (!text.trim()) return;
   stopSpeaking();
   if (isTauri()) {
     try {
-      const audio = new Audio(`data:audio/mpeg;base64,${await native.speakText(text)}`);
-      current = audio;
-      await audio.play();
+      await native.speakText(text);
       return;
     } catch (error) {
       console.warn("Deepgram speech unavailable; using the system voice", error);

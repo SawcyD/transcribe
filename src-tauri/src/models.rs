@@ -211,6 +211,9 @@ pub struct AppSettings {
     /// Let the user talk over the voice agent. Off by default because, on
     /// speakers, the agent would hear (and answer) its own voice.
     pub voice_agent_interruptible: bool,
+    /// Where VoiceFlow's own sounds play (voice agent, read-aloud, tones).
+    /// None = the Windows default output device.
+    pub output_device_name: Option<String>,
     pub auto_apply_transform: Option<String>,
     pub paste_delay_ms: u64,
     pub restore_clipboard: bool,
@@ -283,6 +286,7 @@ impl Default for AppSettings {
             keep_transcription_warm: true,
             assistant_remember_chats: true,
             voice_agent_interruptible: false,
+            output_device_name: None,
             auto_apply_transform: None,
             paste_delay_ms: 140,
             restore_clipboard: true,

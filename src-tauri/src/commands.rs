@@ -78,12 +78,38 @@ pub fn set_transcript_favorite(
     state.database.set_transcript_favorite(&id, favorite)
 }
 
-/// Reads text aloud with the user's chosen Deepgram Aura voice. Returns MP3
-/// audio as base64 for the WebView to play.
+/// Reads text aloud with the chosen Deepgram voice on the chosen output device.
 #[tauri::command]
-pub async fn speak_text(state: State<'_, AppState>, text: String) -> Result<String, AppError> {
+pub async fn speak_text(app: AppHandle, state: State<'_, AppState>, text: String) -> Result<(), AppError> {
     let voice = state.settings.read().await.assistant_voice.clone();
-    crate::tts::speak(&text, voice.as_deref()).await
+    let pcm = crate::tts::speak(&text, voice.as_deref()).await?;
+    crate::sound::play(&app, crate::sound::Channel::Speech, pcm, crate::sound::RATE).await
+}
+
+#[tauri::command]
+pub async fn stop_speaking(app: AppHandle) -> Result<(), AppError> {
+    crate::sound::stop(&app, crate::sound::Channel::Speech).await;
+    Ok(())
+}
+
+/// Plays a UI tone ("start", "stop", "success", "error", "test").
+#[tauri::command]
+pub async fn play_tone(app: AppHandle, name: String) -> Result<(), AppError> {
+    let pcm = crate::sound::named_tone(&name)
+        .ok_or_else(|| AppError::Configuration(format!("unknown tone '{name}'")))?;
+    crate::sound::play(&app, crate::sound::Channel::Tone, pcm, crate::sound::RATE).await
+}
+
+/// Plays the test chime on `device` (what the picker shows, saved or not).
+#[tauri::command]
+pub async fn test_output_device(app: AppHandle, device: Option<String>) -> Result<(), AppError> {
+    let pcm = crate::sound::named_tone("test").unwrap_or_default();
+    crate::sound::play_on(&app, crate::sound::Channel::Tone, pcm, crate::sound::RATE, device).await
+}
+
+#[tauri::command]
+pub fn list_output_devices() -> Result<Vec<String>, AppError> {
+    audio::list_output_devices()
 }
 
 #[tauri::command]
