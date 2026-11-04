@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { isTauri, native } from "../lib/native";
 import type { DictationState } from "../types/models";
 
 type Tone = "start" | "stop" | "success" | "error";
@@ -21,6 +22,7 @@ const TONE_FOR_STATE: Partial<Record<DictationState, Tone>> = {
 
 /**
  * Plays a short tone on the dictation transitions that matter.
+ * (WebAudio is only the browser-dev fallback.)
  *
  * The AudioContext is created lazily on the first tone, because browsers refuse
  * to start one before a user gesture and creating it eagerly logs a warning.
@@ -36,6 +38,13 @@ export function useTones(state: DictationState, enabled: boolean) {
 
     const tone = TONE_FOR_STATE[state];
     if (!tone) return;
+
+    // In the app, tones play natively on the output device chosen in
+    // Settings › Audio; the WebView can only use the Windows default.
+    if (isTauri()) {
+      void native.playTone(tone).catch(() => undefined);
+      return;
+    }
 
     try {
       contextRef.current ??= new AudioContext();

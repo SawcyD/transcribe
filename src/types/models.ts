@@ -138,6 +138,8 @@ export interface AppSettings {
   assistantRememberChats: boolean;
   /** Let the user talk over the voice agent (best with headphones). */
   voiceAgentInterruptible: boolean;
+  /** Where VoiceFlow's sounds play; null = Windows default output. */
+  outputDeviceName: string | null;
   backtrackingEnabled: boolean;
   spokenFormattingEnabled: boolean;
   voiceActionsEnabled: boolean;

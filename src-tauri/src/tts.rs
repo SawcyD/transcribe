@@ -2,8 +2,6 @@
 //! speech synthesis (which used whatever Windows voice happened to be
 //! installed). The API key stays in Rust; the UI only receives audio.
 
-use base64::{engine::general_purpose::STANDARD, Engine as _};
-
 use crate::{
     errors::AppError,
     security::{self, CredentialKind},
@@ -13,8 +11,8 @@ pub const DEFAULT_VOICE: &str = "aura-2-thalia-en";
 /// Deepgram's per-request text limit for /v1/speak.
 const MAX_CHARS: usize = 2_000;
 
-/// Returns MP3 audio for `text` as a base64 string.
-pub async fn speak(text: &str, voice: Option<&str>) -> Result<String, AppError> {
+/// Returns 16-bit mono PCM at `crate::sound::RATE` for `text`.
+pub async fn speak(text: &str, voice: Option<&str>) -> Result<Vec<u8>, AppError> {
     let text = speakable(text);
     if text.is_empty() {
         return Err(AppError::Configuration("there is nothing to read aloud".into()));
@@ -27,7 +25,12 @@ pub async fn speak(text: &str, voice: Option<&str>) -> Result<String, AppError> 
         .map_err(|error| AppError::Credential(error.to_string()))??;
     let response = reqwest::Client::new()
         .post("https://api.deepgram.com/v1/speak")
-        .query(&[("model", voice), ("encoding", "mp3")])
+        .query(&[
+            ("model", voice),
+            ("encoding", "linear16"),
+            ("sample_rate", "24000"),
+            ("container", "none"),
+        ])
         .header("Authorization", format!("Token {api_key}"))
         .json(&serde_json::json!({ "text": text }))
         .send()
@@ -43,7 +46,7 @@ pub async fn speak(text: &str, voice: Option<&str>) -> Result<String, AppError> 
         .bytes()
         .await
         .map_err(|error| AppError::Transcription(error.to_string()))?;
-    Ok(STANDARD.encode(bytes))
+    Ok(bytes.to_vec())
 }
 
 /// Strips Markdown that would otherwise be read out literally ("asterisk

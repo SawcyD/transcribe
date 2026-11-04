@@ -172,7 +172,7 @@ pub async fn start(app: &AppHandle, state: &AppState) -> Result<(), AppError> {
             capture.stream_sample_rate
         );
     }
-    let player = match Player::start(OUTPUT_RATE) {
+    let player = match Player::start(OUTPUT_RATE, settings.output_device_name.as_deref()) {
         Ok(player) => player,
         Err(error) => {
             fail_start(app, error.to_string());

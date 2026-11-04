@@ -44,6 +44,10 @@ pub struct AppState {
     pub transcription_standby: std::sync::Mutex<Option<crate::transcription::Standby>>,
     /// The live voice-agent conversation, when one is running.
     pub voice_agent: Mutex<Option<crate::voice_agent::AgentHandle>>,
+    /// Sounds currently playing (see `sound`), tagged with a generation so a
+    /// finished sound only releases its own device.
+    pub speech_out: Mutex<Option<(u64, crate::audio::playback::Player)>>,
+    pub tone_out: Mutex<Option<(u64, crate::audio::playback::Player)>>,
     /// Lock-free mirrors of the two window-behaviour settings. Window events are
     /// delivered synchronously on the UI thread, where awaiting `settings` could
     /// deadlock against a task already holding it.
@@ -69,6 +73,8 @@ impl AppState {
             assistant: Mutex::new(AssistantRuntime::default()),
             transcription_standby: std::sync::Mutex::new(None),
             voice_agent: Mutex::new(None),
+            speech_out: Mutex::new(None),
+            tone_out: Mutex::new(None),
             close_to_tray,
             minimize_to_tray,
         }

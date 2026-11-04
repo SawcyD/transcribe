@@ -364,3 +364,10 @@ html:has(.agent-dock), html:has(.agent-dock) body, html:has(.agent-dock) #root {
 .mode-card__how { color: var(--memora-text-secondary); font-size: 12.5px; line-height: 1.45; }
 .mode-card__result { color: var(--memora-text); font-size: 12px; font-weight: 550; }
 .mode-card__start { color: var(--memora-text-tertiary); font-size: 11.5px; }
+
+/* --- Page tabs (Settings, Dictation): no more scrolling past everything --- */
+.page-tabs { display: flex; flex-wrap: wrap; gap: 4px; margin: -6px 0 24px; padding-bottom: 10px; border-bottom: 1px solid var(--vf-stroke); }
+.page-tabs__tab { position: relative; min-height: 32px; padding: 0 14px; color: var(--memora-text-secondary); background: transparent; border: 0; border-radius: 999px; font: inherit; font-size: 13px; font-weight: 550; cursor: pointer; transition: background-color 120ms, color 120ms; }
+.page-tabs__tab:hover { color: var(--memora-text); background: var(--memora-subtle-hover); }
+.page-tabs__tab--active, .page-tabs__tab--active:hover { color: var(--memora-text); background: var(--vf-accent-soft); }
+.page-tabs__tab--active::after { position: absolute; left: 50%; bottom: -11px; width: 22px; height: 2px; content: ""; border-radius: 2px; background: var(--memora-accent-usable); transform: translateX(-50%); }

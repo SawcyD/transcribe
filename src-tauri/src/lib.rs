@@ -10,6 +10,7 @@ mod database;
 mod dictation;
 mod dock_layout;
 mod errors;
+mod sound;
 mod tts;
 mod voice_agent;
 mod insertion;
@@ -268,6 +269,10 @@ pub fn run() {
             commands::delete_transcript,
             commands::set_transcript_favorite,
             commands::speak_text,
+            commands::stop_speaking,
+            commands::play_tone,
+            commands::list_output_devices,
+            commands::test_output_device,
             commands::list_assistant_chats,
             commands::get_assistant_chat,
             commands::delete_assistant_chat,

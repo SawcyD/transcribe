@@ -63,11 +63,40 @@ impl Resampler {
     }
 }
 
+/// Names of every output device Windows offers (speakers, headphones, and
+/// virtual devices such as SteelSeries Sonar's Game/Chat/Media channels).
+pub fn list_output_devices() -> Result<Vec<String>, AppError> {
+    let host = cpal::default_host();
+    let devices = host
+        .output_devices()
+        .map_err(|error| AppError::Microphone(error.to_string()))?;
+    let mut names = devices.filter_map(|device| device.name().ok()).collect::<Vec<_>>();
+    names.sort_unstable();
+    names.dedup();
+    Ok(names)
+}
+
+/// The chosen output device, or the system default when none is chosen or the
+/// chosen one is gone (unplugged, Sonar closed).
+fn output_device(name: Option<&str>) -> Result<cpal::Device, AppError> {
+    let host = cpal::default_host();
+    if let Some(name) = name.filter(|name| !name.is_empty()) {
+        if let Some(device) = host
+            .output_devices()
+            .ok()
+            .and_then(|mut devices| devices.find(|device| device.name().ok().as_deref() == Some(name)))
+        {
+            return Ok(device);
+        }
+        log::warn!("output device '{name}' is unavailable; using the system default");
+    }
+    host.default_output_device()
+        .ok_or_else(|| AppError::Microphone("no speakers or headphones are available".into()))
+}
+
 impl Player {
-    pub fn start(source_rate: u32) -> Result<Self, AppError> {
-        let device = cpal::default_host()
-            .default_output_device()
-            .ok_or_else(|| AppError::Microphone("no speakers or headphones are available".into()))?;
+    pub fn start(source_rate: u32, device_name: Option<&str>) -> Result<Self, AppError> {
+        let device = output_device(device_name)?;
         let supported = device
             .default_output_config()
             .map_err(|error| AppError::Microphone(error.to_string()))?;
