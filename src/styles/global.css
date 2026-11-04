@@ -371,10 +371,13 @@ kbd { display: inline-flex; align-items: center; justify-content: center; min-wi
 .privacy-note { display: flex; align-items: flex-start; gap: 11px; padding: 15px 17px; color: #93a0ad; border-radius: 14px; background: rgba(141,241,189,.04); box-shadow: 0 0 0 1px rgba(141,241,189,.08); font-size: 9px; line-height: 1.6; }
 .privacy-note svg { flex: 0 0 auto; color: var(--mint); }
 
-/* --- Recording overlay: a single-row pill --- */
-.overlay-surface { position: relative; display: flex; align-items: center; gap: 10px; width: 100vw; height: 100vh; padding: 0 8px 0 16px; overflow: hidden; border-radius: 999px; background: color-mix(in srgb, var(--memora-acrylic) 70%, rgb(14 16 20 / .94)); box-shadow: 0 0 0 1px color-mix(in srgb, var(--ink) 14%, transparent), inset 0 1px 0 rgba(255, 255, 255, .08); backdrop-filter: blur(30px) saturate(1.1); -webkit-backdrop-filter: blur(30px) saturate(1.1); user-select: none; transition: box-shadow 160ms; }
-.overlay-surface--error { box-shadow: 0 0 0 1px color-mix(in srgb, var(--danger) 55%, transparent), inset 0 1px 0 rgba(255, 255, 255, .06); }
-.overlay-surface--success { box-shadow: 0 0 0 1px color-mix(in srgb, #6ccb6c 45%, transparent), inset 0 1px 0 rgba(255, 255, 255, .06); }
+/* --- Recording overlay: a single-row pill ---
+   The pill fills its window exactly, so rings are drawn inset: an outer
+   box-shadow ring would be clipped by the window edge (flat top/bottom,
+   only the rounded ends showing). */
+.overlay-surface { position: relative; display: flex; align-items: center; gap: 10px; width: 100vw; height: 100vh; padding: 0 8px 0 16px; overflow: hidden; border-radius: 999px; background: color-mix(in srgb, var(--memora-acrylic) 70%, rgb(14 16 20 / .94)); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ink) 14%, transparent), inset 0 1px 0 rgba(255, 255, 255, .08); backdrop-filter: blur(30px) saturate(1.1); -webkit-backdrop-filter: blur(30px) saturate(1.1); user-select: none; transition: box-shadow 160ms; }
+.overlay-surface--error { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--danger) 55%, transparent), inset 0 1px 0 rgba(255, 255, 255, .06); }
+.overlay-surface--success { box-shadow: inset 0 0 0 1px color-mix(in srgb, #6ccb6c 45%, transparent), inset 0 1px 0 rgba(255, 255, 255, .06); }
 .overlay-dot { position: relative; flex: 0 0 auto; display: grid; place-items: center; width: 8px; height: 8px; border-radius: 50%; background: var(--faint); }
 .overlay-dot--listening { background: var(--accent); box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 60%, transparent); animation: overlay-pulse 1.6s ease-out infinite; }
 .overlay-dot--processing { background: transparent; }

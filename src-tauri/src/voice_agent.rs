@@ -74,6 +74,18 @@ fn emit_state(app: &AppHandle, state: &'static str, message: Option<String>) {
     let _ = app.emit("agent-state", AgentStateEvent { state, message });
 }
 
+/// Shows why the conversation couldn't start, then closes the dock.
+fn fail_start(app: &AppHandle, message: String) {
+    emit_state(app, "error", Some(message));
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        tokio::time::sleep(Duration::from_secs(4)).await;
+        if !is_running(&app.state::<AppState>()).await {
+            hide_dock(&app);
+        }
+    });
+}
+
 pub async fn is_running(state: &AppState) -> bool {
     state.voice_agent.lock().await.is_some()
 }
@@ -105,7 +117,7 @@ pub async fn start(app: &AppHandle, state: &AppState) -> Result<(), AppError> {
     let api_key = tokio::task::spawn_blocking(|| security::get(CredentialKind::Deepgram))
         .await
         .map_err(|error| AppError::Credential(error.to_string()))?
-        .inspect_err(|error| emit_state(app, "error", Some(error.to_string())))?;
+        .inspect_err(|error| fail_start(app, error.to_string()))?;
 
     let memory = if settings.assistant_remember_chats {
         recent_memory(state)
@@ -123,11 +135,17 @@ pub async fn start(app: &AppHandle, state: &AppState) -> Result<(), AppError> {
             .parse()
             .map_err(|_| AppError::Credential("Deepgram credential contains invalid characters".into()))?,
     );
-    let (mut socket, _) = match tokio_tungstenite::connect_async(request).await {
+    let connected = tokio::time::timeout(Duration::from_secs(10), tokio_tungstenite::connect_async(request))
+        .await
+        .unwrap_or_else(|_| Err(tokio_tungstenite::tungstenite::Error::Io(std::io::Error::new(
+            std::io::ErrorKind::TimedOut,
+            "timed out after 10 seconds",
+        ))));
+    let (mut socket, _) = match connected {
         Ok(value) => value,
         Err(error) => {
             let message = format!("Couldn't reach the Deepgram voice agent: {error}");
-            emit_state(app, "error", Some(message.clone()));
+            fail_start(app, message.clone());
             return Err(AppError::Transcription(message));
         }
     };
@@ -144,7 +162,7 @@ pub async fn start(app: &AppHandle, state: &AppState) -> Result<(), AppError> {
     ) {
         Ok(value) => value,
         Err(error) => {
-            emit_state(app, "error", Some(error.to_string()));
+            fail_start(app, error.to_string());
             return Err(error);
         }
     };
@@ -157,7 +175,7 @@ pub async fn start(app: &AppHandle, state: &AppState) -> Result<(), AppError> {
     let player = match Player::start(OUTPUT_RATE) {
         Ok(player) => player,
         Err(error) => {
-            emit_state(app, "error", Some(error.to_string()));
+            fail_start(app, error.to_string());
             return Err(error);
         }
     };
@@ -340,10 +358,6 @@ fn recent_memory(state: &AppState) -> Option<String> {
     Some(lines)
 }
 
-const DOCK_WIDTH: u32 = 380;
-const DOCK_HEIGHT: u32 = 132;
-const DOCK_MARGIN: i32 = 56;
-
 fn show_dock(app: &AppHandle, overlay_position: &str) {
     let Some(window) = app.get_webview_window("agent") else {
         return;
@@ -353,15 +367,10 @@ fn show_dock(app: &AppHandle, overlay_position: &str) {
         .ok()
         .and_then(|position| app.monitor_from_point(position.x, position.y).ok().flatten())
         .or_else(|| window.primary_monitor().ok().flatten());
-    if let Some(monitor) = monitor {
-        let size = monitor.size();
-        let origin = monitor.position();
-        let x = origin.x + (size.width.saturating_sub(DOCK_WIDTH) / 2) as i32;
-        let y = if overlay_position.starts_with("top") {
-            origin.y + DOCK_MARGIN
-        } else {
-            origin.y + size.height as i32 - DOCK_MARGIN - DOCK_HEIGHT as i32
-        };
+    if let (Some(monitor), Ok(size)) = (monitor, window.outer_size()) {
+        // Its bottom ("you") pill takes the recording dock's spot.
+        let area = crate::dock_layout::MonitorArea::of(&monitor);
+        let (x, y, _) = crate::dock_layout::beside_dock(area, overlay_position, (size.width, size.height), true);
         let _ = window.set_position(Position::Physical(PhysicalPosition::new(x, y)));
     }
     let _ = window.set_always_on_top(true);

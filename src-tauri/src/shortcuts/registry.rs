@@ -164,6 +164,9 @@ unsafe extern "system" fn keyboard_proc(code: i32, wparam: WPARAM, lparam: LPARA
                     context.keys[vk].store(down, Ordering::Relaxed);
                 }
                 evaluate(context);
+                if down {
+                    note_hold_interruption(context, vk as u16);
+                }
                 if vk < context.swallowed.len() && should_swallow(context, vk as u16, down) {
                     // Returning non-zero stops the key reaching the focused app.
                     return LRESULT(1);
@@ -218,6 +221,46 @@ fn evaluate(context: &HookContext) {
         if context.sender.send(signal).is_err() {
             log::error!("shortcut event dropped because the dispatcher stopped");
         }
+    }
+}
+
+/// Set when an unrelated key is pressed while a modifier-only hold (Ctrl+Win)
+/// is down, e.g. Ctrl+Win+→ to switch virtual desktops. That hold was a
+/// Windows shortcut, not dictation, so its recording is discarded on release.
+static HOLD_INTERRUPTED: AtomicBool = AtomicBool::new(false);
+
+/// Returns (and clears) whether the current/last hold was interrupted.
+pub fn take_hold_interrupted() -> bool {
+    HOLD_INTERRUPTED.swap(false, Ordering::Relaxed)
+}
+
+pub fn clear_hold_interrupted() {
+    HOLD_INTERRUPTED.store(false, Ordering::Relaxed);
+}
+
+fn is_modifier(vk: u16) -> bool {
+    [Modifier::Ctrl, Modifier::Alt, Modifier::Shift, Modifier::Win]
+        .iter()
+        .any(|modifier| modifier.virtual_keys().contains(&vk))
+}
+
+fn note_hold_interruption(context: &HookContext, vk: u16) {
+    if is_modifier(vk) {
+        return;
+    }
+    let Ok(bindings) = context.bindings.read() else {
+        return;
+    };
+    // Keys that belong to a shortcut (Space promoting to hands-free) are part
+    // of the gesture, not an interruption.
+    if bindings.iter().any(|binding| binding.key == Some(vk)) {
+        return;
+    }
+    let holding = bindings.iter().any(|binding| {
+        binding.key.is_none() && !binding.modifiers.is_empty() && binding.active.load(Ordering::Relaxed)
+    });
+    if holding {
+        HOLD_INTERRUPTED.store(true, Ordering::Relaxed);
     }
 }
 
@@ -313,6 +356,24 @@ mod tests {
                 pressed: false,
             }
         );
+    }
+
+    #[test]
+    fn other_keys_during_ctrl_win_mark_the_hold_as_interrupted() {
+        let bindings = ShortcutBindings::default();
+        let (context, _receiver) = context(&bindings);
+        clear_hold_interrupted();
+        for vk in [Modifier::Ctrl.virtual_keys()[0], Modifier::Win.virtual_keys()[0]] {
+            set(&context, vk, true);
+            evaluate(&context);
+        }
+        // Space belongs to hands-free: not an interruption.
+        note_hold_interruption(&context, key_to_vk("Space").unwrap());
+        assert!(!take_hold_interrupted());
+        // Ctrl+Win+Right (switch desktop) is.
+        note_hold_interruption(&context, key_to_vk("Right").unwrap_or(0x27));
+        assert!(take_hold_interrupted());
+        assert!(!take_hold_interrupted(), "taking clears it");
     }
 
     #[test]

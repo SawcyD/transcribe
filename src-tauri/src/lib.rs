@@ -8,6 +8,7 @@ mod commands;
 mod context;
 mod database;
 mod dictation;
+mod dock_layout;
 mod errors;
 mod tts;
 mod voice_agent;
@@ -44,7 +45,9 @@ pub fn run() {
         // buddy, and assistant windows are positioned programmatically.
         .plugin(
             tauri_plugin_window_state::Builder::default()
-                .with_denylist(&["overlay", "buddy", "assistant"])
+                // Floating windows are positioned by VoiceFlow and start hidden;
+                // restoring them would reopen e.g. the voice-agent dock at launch.
+                .with_denylist(&["overlay", "buddy", "assistant", "agent"])
                 .build(),
         )
         .plugin(tauri_plugin_notification::init())
@@ -104,6 +107,7 @@ pub fn run() {
                         (ShortcutAction::PushToTalk, true) => {
                             let current = state.dictation.lock().await.machine.snapshot().state;
                             if current == DictationState::Idle {
+                                shortcuts::clear_hold_interrupted();
                                 if let Err(error) =
                                     dictation::start(&app, &state, DictationMode::PushToTalk).await
                                 {
@@ -118,7 +122,12 @@ pub fn run() {
                             if state.dictation.lock().await.machine.snapshot().state
                                 == DictationState::ListeningPushToTalk
                             {
-                                if let Err(error) = dictation::finish(&app, &state).await {
+                                // Ctrl+Win was part of a Windows shortcut
+                                // (e.g. Ctrl+Win+→), not a dictation.
+                                if shortcuts::take_hold_interrupted() {
+                                    log::debug!("push-to-talk hold was a Windows shortcut; discarding");
+                                    let _ = dictation::cancel(&app, &state).await;
+                                } else if let Err(error) = dictation::finish(&app, &state).await {
                                     log::warn!(
                                         "push-to-talk finish failed; category={}",
                                         error.payload().category

@@ -195,6 +195,12 @@ pub async fn finish(app: &AppHandle, state: &AppState) -> Result<DictationSnapsh
         transcription.detected_language.as_deref().unwrap_or("unknown"),
     );
     if transcription.raw_text.trim().is_empty() {
+        // A brief tap with no speech is an accidental press, not a failed
+        // dictation: close quietly instead of flashing "Didn't catch that".
+        if captured.duration_ms < ACCIDENTAL_PRESS_MS {
+            log::debug!("short silent press ignored; duration_ms={}", captured.duration_ms);
+            return finish_as_cancelled(app, state).await;
+        }
         retain_failed_audio(state, &active.id, captured).await;
         let error = AppError::EmptyTranscript;
         set_error(app, state, error.payload()).await;
@@ -778,6 +784,9 @@ async fn run_cleanup(
     }
 }
 
+/// Recordings shorter than this with no speech are treated as accidental.
+const ACCIDENTAL_PRESS_MS: i64 = 1_500;
+
 /// How long an error stays on the dock before the app returns to Idle.
 const ERROR_DISMISS_MS: u64 = 4_500;
 
@@ -873,6 +882,7 @@ async fn finish_as_cancelled(
         runtime.machine.transition(DictationState::Idle)?;
         runtime.machine.reset();
     }
+    emit_snapshot(app, state).await;
     Ok(state.dictation.lock().await.machine.snapshot())
 }
 
@@ -880,10 +890,6 @@ async fn emit_snapshot(app: &AppHandle, state: &AppState) {
     let snapshot = state.dictation.lock().await.machine.snapshot();
     let _ = app.emit("dictation-state", snapshot);
 }
-
-const OVERLAY_WIDTH: u32 = 360;
-const OVERLAY_HEIGHT: u32 = 48;
-const OVERLAY_MARGIN: u32 = 56;
 
 fn show_overlay(app: &AppHandle, settings: &crate::models::AppSettings) -> Result<(), AppError> {
     if !settings.show_overlay {
@@ -902,19 +908,8 @@ fn show_overlay(app: &AppHandle, settings: &crate::models::AppSettings) -> Resul
         .or_else(|| window.primary_monitor().ok().flatten());
 
     if let Some(monitor) = monitor {
-        let size = monitor.size();
-        let origin = monitor.position();
-        let centered_x = origin.x + (size.width.saturating_sub(OVERLAY_WIDTH) / 2) as i32;
-        let right_x =
-            origin.x + size.width.saturating_sub(OVERLAY_WIDTH + OVERLAY_MARGIN / 2) as i32;
-        let top_y = origin.y + OVERLAY_MARGIN as i32;
-        let bottom_y = origin.y + size.height.saturating_sub(OVERLAY_MARGIN + OVERLAY_HEIGHT) as i32;
-        let (x, y) = match settings.overlay_position.as_str() {
-            "top_center" => (centered_x, top_y),
-            "top_right" => (right_x, top_y),
-            "bottom_right" => (right_x, bottom_y),
-            _ => (centered_x, bottom_y),
-        };
+        let area = crate::dock_layout::MonitorArea::of(&monitor);
+        let (x, y, _, _) = crate::dock_layout::dock_rect(area, &settings.overlay_position);
         let _ = window.set_position(Position::Physical(PhysicalPosition::new(x, y)));
     }
 
