@@ -251,12 +251,6 @@ struct VoicePromptEvent {
     screen_context: Option<ScreenContext>,
 }
 
-/// Mirrors the dock geometry in `dictation::show_overlay`.
-const DOCK_WIDTH: i32 = 360;
-const DOCK_HEIGHT: i32 = 48;
-const DOCK_MARGIN: i32 = 56;
-const BUBBLE_GAP: i32 = 10;
-
 /// Places the answer bubble directly above the dock (or below it when the
 /// dock sits at the top of the screen), on the monitor the user is working on.
 /// Returns "above" or "below" so the bubble can point its tail at the dock.
@@ -269,25 +263,12 @@ fn position_near_dock(app: &AppHandle, window: &tauri::WebviewWindow, dock_posit
     let (Some(monitor), Ok(size)) = (monitor, window.outer_size()) else {
         return "above";
     };
-    let origin = monitor.position();
-    let screen = monitor.size();
-    let (width, height) = (size.width as i32, size.height as i32);
-    let dock_right = dock_position.ends_with("right");
-    let dock_center_x = if dock_right {
-        origin.x + screen.width as i32 - DOCK_MARGIN / 2 - DOCK_WIDTH / 2
-    } else {
-        origin.x + screen.width as i32 / 2
-    };
-    let x = (dock_center_x - width / 2)
-        .clamp(origin.x + 8, origin.x + screen.width as i32 - width - 8);
-    if dock_position.starts_with("top") {
-        let y = origin.y + DOCK_MARGIN + DOCK_HEIGHT + BUBBLE_GAP;
-        let _ = window.set_position(tauri::Position::Physical(tauri::PhysicalPosition::new(x, y)));
+    let area = crate::dock_layout::MonitorArea::of(&monitor);
+    let (x, y, below) = crate::dock_layout::beside_dock(area, dock_position, (size.width, size.height), false);
+    let _ = window.set_position(tauri::Position::Physical(tauri::PhysicalPosition::new(x, y)));
+    if below {
         "below"
     } else {
-        let dock_top = origin.y + screen.height as i32 - DOCK_MARGIN - DOCK_HEIGHT;
-        let y = (dock_top - BUBBLE_GAP - height).max(origin.y + 8);
-        let _ = window.set_position(tauri::Position::Physical(tauri::PhysicalPosition::new(x, y)));
         "above"
     }
 }
