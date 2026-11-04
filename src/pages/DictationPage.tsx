@@ -273,6 +273,24 @@ export function DictationPage() {
           action={<ToggleSwitch label="AI cleanup" checked={settings.cleanupEnabled} onChange={(value) => update("cleanupEnabled", value)} />}
         />
         <SettingsRow
+          label="Skip AI for short dictations"
+          description="Shorter dictations insert faster using local cleanup only. Spoken code (e.g. “snake case”) still uses AI. 0 = always use AI."
+          action={
+            <span className="numeric-field">
+              <input
+                type="number"
+                aria-label="Minimum words for AI cleanup"
+                min={0}
+                max={50}
+                disabled={!settings.cleanupEnabled}
+                value={settings.cleanupMinWords}
+                onChange={(event) => update("cleanupMinWords", Number(event.target.value))}
+              />
+              <small>words</small>
+            </span>
+          }
+        />
+        <SettingsRow
           label="Cleanup style"
           description={STYLES.find((entry) => entry.id === settings.cleanupStyle)?.description}
           action={

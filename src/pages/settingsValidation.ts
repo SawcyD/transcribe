@@ -4,6 +4,7 @@ export interface SettingsErrors {
   cleanupEndpoint?: string;
   assistantEndpoint?: string;
   pasteDelayMs?: string;
+  cleanupMinWords?: string;
   sessionLimitMinutes?: string;
   noiseFloorDb?: string;
   overlayOpacity?: string;
@@ -41,6 +42,9 @@ export function validateSettings(settings: AppSettings): SettingsErrors {
     }
   } catch {
     errors.assistantEndpoint = "Enter a valid endpoint URL.";
+  }
+  if (!Number.isInteger(settings.cleanupMinWords) || settings.cleanupMinWords < 0 || settings.cleanupMinWords > 50) {
+    errors.cleanupMinWords = "Use a whole number from 0 to 50.";
   }
   if (settings.pasteDelayMs < 40 || settings.pasteDelayMs > 2_000) errors.pasteDelayMs = "Use a delay from 40 to 2000 ms.";
   if (settings.sessionLimitMinutes < 1 || settings.sessionLimitMinutes > 120) errors.sessionLimitMinutes = "Use a limit from 1 to 120 minutes.";

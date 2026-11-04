@@ -680,6 +680,15 @@ async fn run_cleanup(
         settings.cleanup_model.clone(),
     )?;
     let style = settings.cleanup_style_for(active_process);
+    if !needs_ai_cleanup(text, &style, settings.cleanup_min_words) {
+        log::debug!("short dictation; skipping AI cleanup round trip");
+        return Ok(CleanupResult {
+            cleaned_text: text.to_string(),
+            corrections_applied: vec![],
+            post_paste_action: PostPasteAction::None,
+            confidence: 1.0,
+        });
+    }
     if style == "balanced" {
         provider.cleanup(text, protected_terms).await
     } else {
@@ -691,6 +700,36 @@ async fn run_cleanup(
 
 /// How long an error stays on the dock before the app returns to Idle.
 const ERROR_DISMISS_MS: u64 = 4_500;
+
+/// Spoken words that only the AI cleanup turns into code ("snake case user
+/// id" -> `user_id`). Short dictations containing them still go to the AI.
+const CODE_CUES: [&str; 14] = [
+    "case", "underscore", "dot", "paren", "bracket", "brace", "slash", "backslash",
+    "equals", "arrow", "colon", "semicolon", "backtick", "quote",
+];
+
+/// Short dictations ("sounds good", "git status") come back from deterministic
+/// cleanup essentially final, so waiting on a second network round trip only
+/// adds latency. The deterministic pass (dictionary, fillers, backtracking,
+/// punctuation) still runs either way.
+fn needs_ai_cleanup(text: &str, style: &str, min_words: u32) -> bool {
+    let words: Vec<String> = text
+        .split_whitespace()
+        .map(|word| {
+            word.trim_matches(|c: char| !c.is_alphanumeric())
+                .to_ascii_lowercase()
+        })
+        .filter(|word| !word.is_empty())
+        .collect();
+    if min_words == 0 || words.len() >= min_words as usize {
+        return true;
+    }
+    let code_style = matches!(style, "developer" | "code_literal");
+    code_style
+        && words
+            .iter()
+            .any(|word| CODE_CUES.contains(&word.as_str()) || word.ends_with("case"))
+}
 
 async fn set_error(app: &AppHandle, state: &AppState, error: AppErrorPayload) {
     let session_id = {
@@ -970,6 +1009,23 @@ mod tests {
             normalize_spoken_structure("Read the bulletin. New Line done"),
             "Read the bulletin. \n done"
         );
+    }
+
+    #[test]
+    fn short_dictations_skip_the_ai_round_trip() {
+        assert!(!needs_ai_cleanup("Sounds good, ship it.", "balanced", 8));
+        assert!(!needs_ai_cleanup("git status", "code_literal", 8));
+        assert!(needs_ai_cleanup(
+            "Can you take another look at the release notes before lunch?",
+            "balanced",
+            8
+        ));
+        // Spoken code still needs the AI to become an identifier.
+        assert!(needs_ai_cleanup("snake case user id", "developer", 8));
+        assert!(needs_ai_cleanup("user dot name", "code_literal", 8));
+        assert!(!needs_ai_cleanup("just in case", "balanced", 8));
+        // 0 disables the shortcut entirely.
+        assert!(needs_ai_cleanup("ok", "balanced", 0));
     }
 
     #[test]

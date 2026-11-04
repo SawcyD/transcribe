@@ -130,6 +130,8 @@ export interface AppSettings {
   appCleanupStyles: AppCleanupStyle[];
   removeFillerWords: boolean;
   removeFalseStarts: boolean;
+  /** Dictations shorter than this skip AI cleanup; 0 always uses it. */
+  cleanupMinWords: number;
   backtrackingEnabled: boolean;
   spokenFormattingEnabled: boolean;
   voiceActionsEnabled: boolean;
