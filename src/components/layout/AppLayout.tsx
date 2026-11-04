@@ -11,10 +11,11 @@ import {
   Settings,
   Wand2,
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { Outlet, useLocation, useNavigate } from "react-router-dom";
 import { NavigationView, type NavigationItem } from "../fluent/NavigationView";
 import { events, native } from "../../lib/native";
+import { hideSplash } from "../../lib/splash";
 
 const MAIN_ITEMS: NavigationItem[] = [
   { to: "/", label: "Home", icon: Home, end: true },
@@ -54,6 +55,11 @@ export function AppLayout() {
   useEffect(() => {
     localStorage.setItem("voiceflow.navigation.collapsed", String(collapsed));
   }, [collapsed]);
+
+  // The window chrome is on screen: retire the HTML loading screen.
+  useEffect(() => {
+    hideSplash();
+  }, []);
 
   // The tray's Settings item routes the main window from outside the webview.
   useEffect(() => {
@@ -99,7 +105,10 @@ export function AppLayout() {
         <NavigationView items={MAIN_ITEMS} footerItems={FOOTER_ITEMS} collapsed={collapsed} />
       </aside>
       <main className="content-frame">
-        <Outlet />
+        {/* Pages load on demand; the sidebar stays put while one arrives. */}
+        <Suspense fallback={<div className="page page--loading" aria-busy="true" />}>
+          <Outlet />
+        </Suspense>
       </main>
     </div>
   );

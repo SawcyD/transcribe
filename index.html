@@ -5,8 +5,68 @@
     <link rel="icon" type="image/svg+xml" href="/voiceflow-icon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>VoiceFlow Dev</title>
+    <script>
+      // Floating windows (dock, Buddy, bubble, agent) share this page but must
+      // stay transparent and never show the splash.
+      if (/^#\/(overlay|buddy|assistant|agent)/.test(location.hash)) {
+        document.documentElement.classList.add("vf-floating");
+      }
+    </script>
+    <style>
+      /* Painted before any JavaScript loads, so the window goes straight to
+         the splash instead of flashing white. */
+      html, body { margin: 0; height: 100%; background: #1b1c1f; color: #fff; }
+      @media (prefers-color-scheme: light) { html, body { background: #f3f3f3; color: #1a1a1a; } }
+      html.vf-floating, html.vf-floating body { background: transparent; }
+      html.vf-floating #vf-splash { display: none; }
+
+      #vf-splash {
+        position: fixed; inset: 0; z-index: 9999; display: grid; place-items: center;
+        font-family: "Segoe UI Variable Display", "Segoe UI", system-ui, sans-serif;
+        background: inherit; transition: opacity 320ms cubic-bezier(.2, 0, 0, 1), visibility 320ms;
+      }
+      #vf-splash.vf-splash--done { opacity: 0; visibility: hidden; }
+      .vf-splash__stack { display: grid; justify-items: center; gap: 18px; animation: vf-splash-in 420ms cubic-bezier(.2, 0, 0, 1) both; }
+      .vf-splash__mark {
+        position: relative; display: flex; align-items: center; justify-content: center; gap: 5px;
+        width: 76px; height: 76px; border-radius: 24px;
+        background: radial-gradient(120% 120% at 30% 20%, rgb(78 163 232 / .28), rgb(167 139 250 / .16) 60%, rgb(255 255 255 / .04));
+        box-shadow: inset 0 0 0 1px rgb(255 255 255 / .1), 0 12px 40px rgb(78 163 232 / .18);
+      }
+      .vf-splash__mark::after {
+        position: absolute; inset: -10px; border-radius: 30px; content: "";
+        box-shadow: 0 0 0 1px rgb(78 163 232 / .35); animation: vf-splash-ring 1.8s ease-out infinite;
+      }
+      .vf-splash__mark i {
+        width: 5px; height: 34px; border-radius: 3px; background: linear-gradient(#7cc0f5, #a78bfa);
+        transform: scaleY(.3); animation: vf-splash-bar 1s ease-in-out infinite;
+      }
+      .vf-splash__mark i:nth-child(2) { animation-delay: .12s; }
+      .vf-splash__mark i:nth-child(3) { animation-delay: .24s; }
+      .vf-splash__mark i:nth-child(4) { animation-delay: .36s; }
+      .vf-splash__mark i:nth-child(5) { animation-delay: .48s; }
+      .vf-splash__name { font-size: 22px; font-weight: 650; letter-spacing: -.02em; }
+      .vf-splash__hint { height: 18px; font-size: 13px; opacity: 0; color: currentColor; animation: vf-splash-hint 300ms ease 1.6s forwards; }
+      @keyframes vf-splash-in { from { opacity: 0; transform: translateY(6px) scale(.98); } to { opacity: 1; transform: none; } }
+      @keyframes vf-splash-bar { 0%, 100% { transform: scaleY(.3); } 50% { transform: scaleY(1); } }
+      @keyframes vf-splash-ring { 0% { opacity: .9; transform: scale(.92); } 100% { opacity: 0; transform: scale(1.18); } }
+      @keyframes vf-splash-hint { to { opacity: .55; } }
+      @media (prefers-reduced-motion: reduce) {
+        .vf-splash__stack, .vf-splash__mark::after, .vf-splash__mark i { animation: none; }
+        .vf-splash__mark i { transform: scaleY(.6); }
+        .vf-splash__hint { opacity: .55; animation: none; }
+      }
+    </style>
   </head>
   <body>
+    <div id="vf-splash" role="status" aria-label="Loading VoiceFlow">
+      <div class="vf-splash__stack">
+        <div class="vf-splash__mark" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div>
+        <div class="vf-splash__name">VoiceFlow</div>
+        <!-- Only appears if loading takes a while, so fast starts stay clean. -->
+        <div class="vf-splash__hint">Getting your voice ready…</div>
+      </div>
+    </div>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

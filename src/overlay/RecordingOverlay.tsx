@@ -59,6 +59,7 @@ export function RecordingOverlay() {
 
   return (
     <div
+      key={sessionId ?? "idle"}
       className={`overlay-surface overlay-surface--${presentation.tone}`}
       style={{ opacity: settings.overlayOpacity / 100 }}
       data-tauri-drag-region

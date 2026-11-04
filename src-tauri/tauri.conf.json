@@ -14,6 +14,7 @@
       {
         "label": "main",
         "title": "VoiceFlow Dev",
+        "backgroundColor": "#1b1c1f",
         "width": 1120,
         "height": 760,
         "minWidth": 820,

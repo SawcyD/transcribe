@@ -7,6 +7,7 @@ import { Button } from "../components/common/Button";
 import { InfoBar } from "../components/fluent/InfoBar";
 import { StatusIndicator } from "../components/fluent/StatusIndicator";
 import { native } from "../lib/native";
+import { useCountUp } from "../app/useCountUp";
 import { bindingKeys } from "../lib/shortcutKeys";
 import { computeHomeStats, formatMinutes, TYPING_WPM, type HomeStats } from "./homeStats";
 import type { AppSettings, CredentialStatus, DictationSnapshot, ShortcutActionId, TranscriptRecord } from "../types/models";
@@ -52,6 +53,10 @@ function elapsedLabel(startedAt: string | null | undefined): string | null {
   if (!startedAt) return null;
   const seconds = Math.max(0, Math.floor((Date.now() - new Date(startedAt).getTime()) / 1000));
   return `${String(Math.floor(seconds / 60)).padStart(2, "0")}:${String(seconds % 60).padStart(2, "0")}`;
+}
+
+function CountUp({ value, format = (n) => Math.round(n).toLocaleString() }: { value: number; format?: (n: number) => string }) {
+  return <span className="stat-tile__value">{format(useCountUp(value))}</span>;
 }
 
 export function HomePage() {
@@ -143,19 +148,19 @@ export function HomePage() {
       {stats && stats.wordsAllTime > 0 && (
         <section className="stat-tiles" aria-label="Today">
           <div className="stat-tile">
-            <span className="stat-tile__value">{stats.wordsToday.toLocaleString()}</span>
+            <CountUp value={stats.wordsToday} />
             <span className="stat-tile__label">words today</span>
           </div>
           <div className="stat-tile">
-            <span className="stat-tile__value">{stats.dictationsToday}</span>
+            <CountUp value={stats.dictationsToday} />
             <span className="stat-tile__label">{stats.dictationsToday === 1 ? "dictation" : "dictations"} today</span>
           </div>
           <div className="stat-tile" title={`Compared with typing at ${TYPING_WPM} words per minute`}>
-            <span className="stat-tile__value">{formatMinutes(stats.minutesSavedToday)}</span>
+            <CountUp value={stats.minutesSavedToday} format={formatMinutes} />
             <span className="stat-tile__label">saved vs typing</span>
           </div>
           <div className="stat-tile">
-            <span className="stat-tile__value">{stats.streakDays}</span>
+            <CountUp value={stats.streakDays} />
             <span className="stat-tile__label">day streak</span>
           </div>
         </section>
