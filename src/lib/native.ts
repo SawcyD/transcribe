@@ -193,6 +193,10 @@ export const events = {
   /** Route changes requested from outside the webview, e.g. the tray's Settings item. */
   navigate: (handler: (route: string) => void): Promise<UnlistenFn> =>
     isTauri() ? listen<string>("navigate", ({ payload }) => handler(payload)) : Promise.resolve(() => undefined),
-  assistantVoicePrompt: (handler: (value: string) => void): Promise<UnlistenFn> =>
-    isTauri() ? listen<string>("assistant-voice-prompt", ({ payload }) => handler(payload)) : Promise.resolve(() => undefined),
+  assistantVoicePrompt: (handler: (value: { prompt: string; screenContext: ScreenContext | null }) => void): Promise<UnlistenFn> =>
+    isTauri()
+      ? listen<{ prompt: string; screenContext: ScreenContext | null }>("assistant-voice-prompt", ({ payload }) => handler(payload))
+      : Promise.resolve(() => undefined),
+  assistantPlacement: (handler: (value: "above" | "below") => void): Promise<UnlistenFn> =>
+    isTauri() ? listen<"above" | "below">("assistant-placement", ({ payload }) => handler(payload)) : Promise.resolve(() => undefined),
 };

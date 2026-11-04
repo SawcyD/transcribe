@@ -10,7 +10,7 @@ use crate::{
     security::{self, CredentialKind},
 };
 
-const SYSTEM_PROMPT: &str = "You are Buddy, VoiceFlow's concise desktop assistant. Help the user understand the explicitly supplied screen context. Be practical, clear, and direct. Do not claim to have access to anything that was not supplied. Never suggest or perform desktop actions unless the user explicitly asks; this release is read-only.";
+const SYSTEM_PROMPT: &str = "You are VoiceFlow's on-screen helper. The user is stuck on something and asked you about it, usually by voice, so their question may be short or loosely worded. When a screenshot is attached it shows the window they were working in: focus on that window, not on VoiceFlow itself. Explain what is going on in plain language, then what to do next. For an error, give the likely cause and a concrete fix. For dense text or a settings screen, summarise what matters. For a problem or exercise, walk through the reasoning step by step. Keep answers short (a few sentences or a short list), use Markdown sparingly, and put code in fenced blocks. Never claim to see anything that was not supplied. You are read-only: never click, type, or change anything on the user's behalf.";
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -160,56 +160,88 @@ pub async fn open_drawer(
     let window = app
         .get_webview_window("assistant")
         .ok_or_else(|| AppError::Windows("assistant window is unavailable".into()))?;
-    position_above_buddy(app, &window);
+    let dock_position = state.settings.read().await.overlay_position.clone();
+    let placement = position_near_dock(app, &window, &dock_position);
     window
         .set_always_on_top(true)
         .map_err(|error| AppError::Windows(error.to_string()))?;
     window
         .show()
         .map_err(|error| AppError::Windows(error.to_string()))?;
-    window
-        .set_focus()
-        .map_err(|error| AppError::Windows(error.to_string()))?;
-    if let Some(screen_context) = screen_context {
-        app.emit("assistant-screen-context", screen_context)
+    let _ = app.emit("assistant-placement", placement);
+    match voice_prompt {
+        // A spoken question and its screenshot travel together. They used to
+        // be two events, and the second one cleared the screenshot, so spoken
+        // questions were always sent without the screen.
+        Some(prompt) => {
+            app.emit(
+                "assistant-voice-prompt",
+                VoicePromptEvent {
+                    prompt,
+                    screen_context,
+                },
+            )
             .map_err(|error| AppError::Windows(error.to_string()))?;
-    }
-    if let Some(voice_prompt) = voice_prompt {
-        app.emit("assistant-voice-prompt", voice_prompt)
-            .map_err(|error| AppError::Windows(error.to_string()))?;
+        }
+        None => {
+            // Typed follow-ups need keyboard focus; spoken ones must not steal
+            // it from the app the user is working in.
+            let _ = window.set_focus();
+            if let Some(screen_context) = screen_context {
+                app.emit("assistant-screen-context", screen_context)
+                    .map_err(|error| AppError::Windows(error.to_string()))?;
+            }
+        }
     }
     Ok(())
 }
 
-fn position_above_buddy(app: &AppHandle, assistant: &tauri::WebviewWindow) {
-    let Some(buddy) = app.get_webview_window("buddy") else {
-        return;
-    };
-    let Ok(buddy_position) = buddy.outer_position() else {
-        return;
-    };
-    let Ok(buddy_size) = buddy.outer_size() else {
-        return;
-    };
-    let Ok(assistant_size) = assistant.outer_size() else {
-        return;
-    };
-    let (left, top) = assistant
-        .current_monitor()
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct VoicePromptEvent {
+    prompt: String,
+    screen_context: Option<ScreenContext>,
+}
+
+/// Mirrors the dock geometry in `dictation::show_overlay`.
+const DOCK_WIDTH: i32 = 360;
+const DOCK_HEIGHT: i32 = 48;
+const DOCK_MARGIN: i32 = 56;
+const BUBBLE_GAP: i32 = 10;
+
+/// Places the answer bubble directly above the dock (or below it when the
+/// dock sits at the top of the screen), on the monitor the user is working on.
+/// Returns "above" or "below" so the bubble can point its tail at the dock.
+fn position_near_dock(app: &AppHandle, window: &tauri::WebviewWindow, dock_position: &str) -> &'static str {
+    let monitor = app
+        .cursor_position()
         .ok()
-        .flatten()
-        .map(|monitor| {
-            (
-                monitor.work_area().position.x + 8,
-                monitor.work_area().position.y + 8,
-            )
-        })
-        .unwrap_or((0, 0));
-    let x = (buddy_position.x + buddy_size.width as i32 - assistant_size.width as i32).max(left);
-    let y = (buddy_position.y - assistant_size.height as i32 - 14).max(top);
-    let _ = assistant.set_position(tauri::Position::Physical(tauri::PhysicalPosition::new(
-        x, y,
-    )));
+        .and_then(|position| app.monitor_from_point(position.x, position.y).ok().flatten())
+        .or_else(|| window.primary_monitor().ok().flatten());
+    let (Some(monitor), Ok(size)) = (monitor, window.outer_size()) else {
+        return "above";
+    };
+    let origin = monitor.position();
+    let screen = monitor.size();
+    let (width, height) = (size.width as i32, size.height as i32);
+    let dock_right = dock_position.ends_with("right");
+    let dock_center_x = if dock_right {
+        origin.x + screen.width as i32 - DOCK_MARGIN / 2 - DOCK_WIDTH / 2
+    } else {
+        origin.x + screen.width as i32 / 2
+    };
+    let x = (dock_center_x - width / 2)
+        .clamp(origin.x + 8, origin.x + screen.width as i32 - width - 8);
+    if dock_position.starts_with("top") {
+        let y = origin.y + DOCK_MARGIN + DOCK_HEIGHT + BUBBLE_GAP;
+        let _ = window.set_position(tauri::Position::Physical(tauri::PhysicalPosition::new(x, y)));
+        "below"
+    } else {
+        let dock_top = origin.y + screen.height as i32 - DOCK_MARGIN - DOCK_HEIGHT;
+        let y = (dock_top - BUBBLE_GAP - height).max(origin.y + 8);
+        let _ = window.set_position(tauri::Position::Physical(tauri::PhysicalPosition::new(x, y)));
+        "above"
+    }
 }
 
 async fn stream_response(

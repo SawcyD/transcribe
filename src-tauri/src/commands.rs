@@ -399,14 +399,15 @@ pub async fn open_assistant_drawer(
 pub async fn get_pending_assistant_context(
     state: State<'_, AppState>,
 ) -> Result<Option<ScreenContext>, AppError> {
-    Ok(state.assistant.lock().await.pending_screen_context.clone())
+    // Taken, not cloned: a reopened bubble must not replay an old request.
+    Ok(state.assistant.lock().await.pending_screen_context.take())
 }
 
 #[tauri::command]
 pub async fn get_pending_assistant_voice_prompt(
     state: State<'_, AppState>,
 ) -> Result<Option<String>, AppError> {
-    Ok(state.assistant.lock().await.pending_voice_prompt.clone())
+    Ok(state.assistant.lock().await.pending_voice_prompt.take())
 }
 
 #[tauri::command]
