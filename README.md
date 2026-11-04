@@ -50,3 +50,27 @@ Staged for the next slice: application-specific insertion adapters, selected-tex
 ## Windows permissions
 
 The app needs microphone permission, access to the foreground window for focus restoration, and permission to register a low-level keyboard hook. Windows Defender or enterprise policy may prompt before allowing the global shortcut hook. No account system or cloud sync is required.
+
+## Releasing
+
+Releases are built and signed by GitHub Actions when a `v*` tag is pushed. The app's auto-updater picks them up from the latest GitHub release.
+
+1. Merge your work into `main` and check out `main`.
+2. Add a `## vX.Y.Z` section to `CHANGELOG.md`. Write it for users: it becomes the release notes and the text in the app's "Update available" dialog.
+3. Set the version everywhere and tag it:
+
+```powershell
+pnpm release:version 1.2.0
+pnpm check
+git commit -am "Release v1.2.0"
+git tag v1.2.0
+git push origin main v1.2.0
+```
+
+The workflow refuses to publish if the tag doesn't match `package.json`. To preview the notes, run `pnpm release:notes 1.2.0`.
+
+The repository needs the `TAURI_SIGNING_PRIVATE_KEY` and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` secrets. They must match the updater public key in `src-tauri/tauri.conf.json`, or installed copies won't accept the update.
+
+## UI style
+
+`docs/STYLE.md` is a portable copy of this app's look: tokens, one CSS file, and HTML for every component, ready to reuse in other projects. Open `docs/style-preview.html` to see all of it.

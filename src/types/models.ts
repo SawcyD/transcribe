@@ -130,6 +130,14 @@ export interface AppSettings {
   appCleanupStyles: AppCleanupStyle[];
   removeFillerWords: boolean;
   removeFalseStarts: boolean;
+  /** Dictations shorter than this skip AI cleanup; 0 always uses it. */
+  cleanupMinWords: number;
+  /** Keep a Deepgram connection open between dictations for a faster start. */
+  keepTranscriptionWarm: boolean;
+  /** Save assistant chats and let the assistant recall them later. */
+  assistantRememberChats: boolean;
+  /** Let the user talk over the voice agent (best with headphones). */
+  voiceAgentInterruptible: boolean;
   backtrackingEnabled: boolean;
   spokenFormattingEnabled: boolean;
   voiceActionsEnabled: boolean;
@@ -173,6 +181,7 @@ export interface ShortcutBindings {
   handsFree: ShortcutBinding;
   commandMode: ShortcutBinding;
   cancel: ShortcutBinding;
+  voiceAgent: ShortcutBinding;
 }
 
 export type ShortcutActionId = keyof ShortcutBindings;
@@ -191,6 +200,22 @@ export interface CredentialStatus {
 export interface AssistantStateEvent { requestId: string; state: "thinking" | "streaming" | "completed" | "error"; message?: string; }
 export interface AssistantDeltaEvent { requestId: string; delta: string; }
 export interface AssistantConversationTurn { role: "user" | "assistant"; content: string; }
+
+export interface AssistantChatSummary {
+  id: string;
+  title: string;
+  applicationName: string | null;
+  createdAt: string;
+  updatedAt: string;
+  turnCount: number;
+  preview: string;
+}
+
+export interface AssistantChatTurn {
+  question: string;
+  answer: string;
+  createdAt: string;
+}
 
 export interface DashboardStats {
   dailyWords: number;

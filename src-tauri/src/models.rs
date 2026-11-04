@@ -200,6 +200,17 @@ pub struct AppSettings {
     pub cleanup_endpoint: String,
     pub cleanup_model: String,
     pub cleanup_style: String,
+    /// Dictations shorter than this many words skip the AI cleanup round trip
+    /// (deterministic cleanup still runs). 0 sends everything to the AI.
+    pub cleanup_min_words: u32,
+    /// Keep a Deepgram connection open between dictations so the next one
+    /// starts without a handshake. Idle connections close after 5 minutes.
+    pub keep_transcription_warm: bool,
+    /// Save assistant conversations and let the assistant recall them later.
+    pub assistant_remember_chats: bool,
+    /// Let the user talk over the voice agent. Off by default because, on
+    /// speakers, the agent would hear (and answer) its own voice.
+    pub voice_agent_interruptible: bool,
     pub auto_apply_transform: Option<String>,
     pub paste_delay_ms: u64,
     pub restore_clipboard: bool,
@@ -268,6 +279,10 @@ impl Default for AppSettings {
             cleanup_endpoint: "https://api.openai.com/v1".into(),
             cleanup_model: "gpt-4.1-mini".into(),
             cleanup_style: "balanced".into(),
+            cleanup_min_words: 8,
+            keep_transcription_warm: true,
+            assistant_remember_chats: true,
+            voice_agent_interruptible: false,
             auto_apply_transform: None,
             paste_delay_ms: 140,
             restore_clipboard: true,
@@ -387,6 +402,9 @@ impl AppSettings {
                 ));
             }
         }
+        if self.cleanup_min_words > 50 {
+            return Err("the AI cleanup word threshold must be between 0 and 50".into());
+        }
         if !(40..=100).contains(&self.overlay_opacity) {
             return Err("overlay opacity must be between 40 and 100 percent".into());
         }
@@ -471,7 +489,6 @@ pub struct TranscriptionConfig {
     pub punctuation: bool,
     pub smart_formatting: bool,
     pub dictionary_keyterms: Vec<String>,
-    pub active_application: Option<String>,
     pub developer_mode: bool,
     pub endpointing_ms: u32,
 }

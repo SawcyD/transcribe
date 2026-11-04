@@ -4,6 +4,7 @@ import { FluentProvider } from "@memora/ui";
 import "@memora/ui/styles.css";
 import App from "./App";
 import "./styles/global.css";
+import "./styles/refresh.css";
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>

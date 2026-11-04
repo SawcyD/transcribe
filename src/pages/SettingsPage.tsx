@@ -1,4 +1,6 @@
 import { disable, enable, isEnabled } from "@tauri-apps/plugin-autostart";
+import { useAutoSave } from "../app/useAutoSave";
+import { SaveIndicator } from "../components/common/SaveIndicator";
 import { relaunch } from "@tauri-apps/plugin-process";
 import { check, type Update } from "@tauri-apps/plugin-updater";
 import { useEffect, useMemo, useState } from "react";
@@ -30,7 +32,7 @@ export function SettingsPage() {
   const [resetting, setResetting] = useState(false);
   const [report, setReport] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const [saved, setSaved] = useState(false);
+  const [loaded, setLoaded] = useState(false);
   const [updateStatus, setUpdateStatus] = useState<UpdateStatus>({ kind: "idle" });
 
   const errors = useMemo(() => validateSettings(settings), [settings]);
@@ -43,6 +45,7 @@ export function SettingsPage() {
         setSettings(stored);
         setCredentials(status);
         setLaunchOnStartup(startupEnabled);
+        setLoaded(true);
       },
     );
   }, []);
@@ -50,14 +53,21 @@ export function SettingsPage() {
   const update = <K extends keyof AppSettings>(key: K, value: AppSettings[K]) =>
     setSettings((current) => ({ ...current, [key]: value }));
 
-  const save = async () => {
-    if (!valid) return;
-    const pending: Promise<unknown>[] = [native.saveSettings(settings)];
-    if (isTauri()) pending.push(launchOnStartup ? enable() : disable());
-    await Promise.all(pending);
-    setSaved(true);
-    window.setTimeout(() => setSaved(false), 2000);
-  };
+  const saveState = useAutoSave(
+    { settings, launchOnStartup },
+    {
+      ready: loaded,
+      valid,
+      persist: async (next) => {
+        // Merge onto the freshest stored copy so fields other pages own
+        // (e.g. lastPage) are not rolled back by this page's snapshot.
+        const stored = await native.settings();
+        const pending: Promise<unknown>[] = [native.saveSettings({ ...next.settings, lastPage: stored.lastPage })];
+        if (isTauri()) pending.push(next.launchOnStartup ? enable() : disable());
+        await Promise.all(pending);
+      },
+    },
+  );
 
   const storeCredential = async () => {
     if (!credentialDialog || !secret.trim()) return;
@@ -93,7 +103,7 @@ export function SettingsPage() {
       <header className="page-header">
         <h1>Settings</h1>
         <p className="page-header__meta">
-          <span>Application behaviour, providers, privacy, and diagnostics.</span>
+          <span>Application behaviour, providers, privacy, and diagnostics. Changes save automatically.</span>
         </p>
       </header>
 
@@ -427,11 +437,7 @@ export function SettingsPage() {
         />
       </SettingsSection>
 
-      <div className="command-row">
-        <Button variant="primary" disabled={!valid} onClick={() => void save()}>
-          {saved ? "Saved" : "Save changes"}
-        </Button>
-      </div>
+      <SaveIndicator state={saveState} />
 
       <ContentDialog
         open={updateStatus.kind === "available"}

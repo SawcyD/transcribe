@@ -1,4 +1,4 @@
-import { Headphones, MessageSquare, Mic, Play } from "lucide-react";
+import { AudioLines, Headphones, MessageSquare, Mic, Play } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { InfoRow, ProgressBar, SectionHeader } from "@memora/ui";
@@ -7,14 +7,19 @@ import { Button } from "../components/common/Button";
 import { InfoBar } from "../components/fluent/InfoBar";
 import { StatusIndicator } from "../components/fluent/StatusIndicator";
 import { native } from "../lib/native";
-import type { AppSettings, CredentialStatus, DictationSnapshot, TranscriptRecord } from "../types/models";
+import { bindingKeys } from "../lib/shortcutKeys";
+import { computeHomeStats, formatMinutes, TYPING_WPM, type HomeStats } from "./homeStats";
+import type { AppSettings, CredentialStatus, DictationSnapshot, ShortcutActionId, TranscriptRecord } from "../types/models";
 
-const SHORTCUTS = [
-  { keys: ["Ctrl", "Win"], label: "Push to talk", description: "Hold while speaking, release to insert." },
-  { keys: ["Ctrl", "Win", "Space"], label: "Hands-free dictation", description: "Press to start, press again to finish." },
-  { keys: ["Ctrl", "Alt", "B"], label: "Command Mode", description: "Speak a request to the assistant." },
-  { keys: ["Esc"], label: "Cancel", description: "Discard the active dictation." },
+/** What each shortcut does, in plain words. Keys come from your settings. */
+const SHORTCUTS: Array<{ id: ShortcutActionId; label: string; description: string }> = [
+  { id: "pushToTalk", label: "Dictate", description: "Hold and speak; let go to type it where your cursor is." },
+  { id: "handsFree", label: "Dictate hands-free", description: "Press to start talking, press again to type it." },
+  { id: "commandMode", label: "Ask about your screen", description: "Hold and ask a question; the answer pops up above the dock." },
+  { id: "voiceAgent", label: "Talk to the assistant", description: "Press for a spoken back-and-forth conversation; press again to end." },
+  { id: "cancel", label: "Cancel", description: "Throw away the current recording." },
 ];
+
 
 /** Human-readable primary status line, derived from the dictation state machine. */
 function statusHeadline(snapshot: DictationSnapshot, configured: boolean): string {
@@ -55,6 +60,7 @@ export function HomePage() {
   const [settings, setSettings] = useState<AppSettings | null>(null);
   const [credentials, setCredentials] = useState<CredentialStatus>({ deepgram: false, cleanup: false, assistant: false });
   const [recent, setRecent] = useState<TranscriptRecord[]>([]);
+  const [stats, setStats] = useState<HomeStats | null>(null);
   const [, forceTick] = useState(0);
 
   useEffect(() => {
@@ -63,6 +69,7 @@ export function HomePage() {
         setSettings(nextSettings);
         setCredentials(nextCredentials);
         setRecent(transcripts.slice(0, 5));
+        setStats(computeHomeStats(transcripts));
       },
     );
   }, [dictation.state]);
@@ -133,6 +140,27 @@ export function HomePage() {
         </div>
       </section>
 
+      {stats && stats.wordsAllTime > 0 && (
+        <section className="stat-tiles" aria-label="Today">
+          <div className="stat-tile">
+            <span className="stat-tile__value">{stats.wordsToday.toLocaleString()}</span>
+            <span className="stat-tile__label">words today</span>
+          </div>
+          <div className="stat-tile">
+            <span className="stat-tile__value">{stats.dictationsToday}</span>
+            <span className="stat-tile__label">{stats.dictationsToday === 1 ? "dictation" : "dictations"} today</span>
+          </div>
+          <div className="stat-tile" title={`Compared with typing at ${TYPING_WPM} words per minute`}>
+            <span className="stat-tile__value">{formatMinutes(stats.minutesSavedToday)}</span>
+            <span className="stat-tile__label">saved vs typing</span>
+          </div>
+          <div className="stat-tile">
+            <span className="stat-tile__value">{stats.streakDays}</span>
+            <span className="stat-tile__label">day streak</span>
+          </div>
+        </section>
+      )}
+
       <section className="settings-group" aria-label="Shortcuts">
         <h2 className="settings-group__title">Shortcuts</h2>
         <div className="settings-group__rows">
@@ -144,7 +172,7 @@ export function HomePage() {
               </span>
               <span className="settings-row__action">
                 <span className="shortcut-chip">
-                  {shortcut.keys.map((key) => (
+                  {bindingKeys(settings?.shortcuts?.[shortcut.id]).map((key) => (
                     <kbd key={key}>{key}</kbd>
                   ))}
                 </span>
@@ -155,8 +183,11 @@ export function HomePage() {
       </section>
 
       <div className="command-row command-row--secondary">
-        <Button variant="secondary" disabled={!configured || listening} icon={<MessageSquare size={16} />} onClick={() => void native.start("command")}>
-          Open Command Mode
+        <Button variant="secondary" icon={<MessageSquare size={16} />} onClick={() => navigate("/assistant-settings")}>
+          Open assistant
+        </Button>
+        <Button variant="secondary" disabled={!configured || listening} icon={<AudioLines size={16} />} onClick={() => void native.startVoiceAgent()}>
+          Talk to the assistant
         </Button>
         <Button variant="secondary" disabled={!configured || listening} icon={<Headphones size={16} />} onClick={() => void native.start("call")}>
           Call Mode
@@ -164,7 +195,14 @@ export function HomePage() {
       </div>
 
       <section className="settings-group" aria-label="Recent activity">
-        <h2 className="settings-group__title">Recent activity</h2>
+        <div className="section-heading">
+          <h2 className="settings-group__title">Recent activity</h2>
+          {recent.length > 0 && (
+            <button type="button" className="text-button" onClick={() => navigate("/history")}>
+              View all
+            </button>
+          )}
+        </div>
         {recent.length === 0 ? (
           <div className="empty-state">
             <strong>No dictations yet</strong>
@@ -180,7 +218,10 @@ export function HomePage() {
                 onClick={() => navigate("/history", { state: { transcriptId: record.id } })}
               >
                 <time>{new Date(record.createdAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</time>
-                <span className="activity-row__app">{record.applicationName ?? "Unknown app"}</span>
+                <span className="activity-row__body">
+                  <span className="activity-row__app">{record.applicationName ?? "Unknown app"}</span>
+                  <span className="activity-row__excerpt">{record.finalTranscript}</span>
+                </span>
                 <span className="activity-row__words">
                   {record.finalTranscript.trim().split(/\s+/).filter(Boolean).length} words
                 </span>

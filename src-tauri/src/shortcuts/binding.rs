@@ -72,7 +72,7 @@ impl ShortcutBinding {
     }
 }
 
-/// The four rebindable dictation gestures.
+/// The rebindable gestures.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ShortcutBindings {
@@ -80,6 +80,14 @@ pub struct ShortcutBindings {
     pub hands_free: ShortcutBinding,
     pub command_mode: ShortcutBinding,
     pub cancel: ShortcutBinding,
+    /// Toggles a live spoken conversation with the assistant. Defaulted so
+    /// settings saved before this existed still load.
+    #[serde(default = "default_voice_agent")]
+    pub voice_agent: ShortcutBinding,
+}
+
+fn default_voice_agent() -> ShortcutBinding {
+    ShortcutBinding::new(&["ctrl", "alt"], Some("V"))
 }
 
 impl Default for ShortcutBindings {
@@ -89,17 +97,19 @@ impl Default for ShortcutBindings {
             hands_free: ShortcutBinding::new(&["ctrl", "win"], Some("Space")),
             command_mode: ShortcutBinding::new(&["ctrl", "alt"], Some("B")),
             cancel: ShortcutBinding::new(&[], Some("Escape")),
+            voice_agent: default_voice_agent(),
         }
     }
 }
 
 impl ShortcutBindings {
-    pub fn entries(&self) -> [(ShortcutAction, &ShortcutBinding); 4] {
+    pub fn entries(&self) -> [(ShortcutAction, &ShortcutBinding); 5] {
         [
             (ShortcutAction::PushToTalk, &self.push_to_talk),
             (ShortcutAction::HandsFree, &self.hands_free),
             (ShortcutAction::CommandMode, &self.command_mode),
             (ShortcutAction::Cancel, &self.cancel),
+            (ShortcutAction::VoiceAgent, &self.voice_agent),
         ]
     }
 
@@ -132,6 +142,7 @@ pub enum ShortcutAction {
     HandsFree,
     CommandMode,
     Cancel,
+    VoiceAgent,
 }
 
 impl ShortcutAction {
@@ -141,6 +152,7 @@ impl ShortcutAction {
             ShortcutAction::HandsFree => "Hands-free dictation",
             ShortcutAction::CommandMode => "Command Mode",
             ShortcutAction::Cancel => "Cancel",
+            ShortcutAction::VoiceAgent => "Voice agent",
         }
     }
 }

@@ -149,5 +149,25 @@ pub fn run(connection: &Connection) -> Result<(), AppError> {
 
         INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (1, datetime('now'));
     "#)?;
+    // v2: saved assistant chats. Each turn is one question + answer, which is
+    // also the unit the assistant's memory recalls.
+    connection.execute_batch(r#"
+        CREATE TABLE IF NOT EXISTS assistant_chats (
+            id TEXT PRIMARY KEY,
+            title TEXT NOT NULL,
+            application_name TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS assistant_turns (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            chat_id TEXT NOT NULL REFERENCES assistant_chats(id) ON DELETE CASCADE,
+            question TEXT NOT NULL,
+            answer TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_assistant_turns_chat ON assistant_turns(chat_id, id);
+        INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (2, datetime('now'));
+    "#)?;
     Ok(())
 }

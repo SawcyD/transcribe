@@ -40,6 +40,8 @@ struct HookContext {
     sender: UnboundedSender<ShortcutSignal>,
     /// Physical key state indexed by virtual-key code.
     keys: Vec<AtomicBool>,
+    /// Keys whose key-down was consumed, so their repeats and key-up are too.
+    swallowed: Vec<AtomicBool>,
     bindings: RwLock<Vec<CompiledBinding>>,
 }
 
@@ -100,6 +102,7 @@ pub fn start_modifier_hook(
         .set(HookContext {
             sender,
             keys: (0..VK_COUNT).map(|_| AtomicBool::new(false)).collect(),
+            swallowed: (0..VK_COUNT).map(|_| AtomicBool::new(false)).collect(),
             bindings: RwLock::new(compile(bindings)),
         })
         .map_err(|_| AppError::Windows("shortcut keyboard hook was already initialized".into()))?;
@@ -161,6 +164,10 @@ unsafe extern "system" fn keyboard_proc(code: i32, wparam: WPARAM, lparam: LPARA
                     context.keys[vk].store(down, Ordering::Relaxed);
                 }
                 evaluate(context);
+                if vk < context.swallowed.len() && should_swallow(context, vk as u16, down) {
+                    // Returning non-zero stops the key reaching the focused app.
+                    return LRESULT(1);
+                }
             }
         }
     }
@@ -214,6 +221,31 @@ fn evaluate(context: &HookContext) {
     }
 }
 
+/// The trigger key of an active chord (the B in Ctrl+Alt+B, the Space in
+/// Ctrl+Win+Space) must not also reach the focused app: holding it used to
+/// auto-repeat the app's own Ctrl+Alt+B action, and Space switched keyboard
+/// layouts. Modifiers always pass through, and so do bare-key bindings like
+/// Escape, which must keep working everywhere else.
+fn should_swallow(context: &HookContext, vk: u16, down: bool) -> bool {
+    let slot = &context.swallowed[vk as usize];
+    if !down {
+        return slot.swap(false, Ordering::Relaxed);
+    }
+    if slot.load(Ordering::Relaxed) {
+        return true; // auto-repeat of a key we already consumed
+    }
+    let Ok(bindings) = context.bindings.read() else {
+        return false;
+    };
+    let consume = bindings.iter().any(|binding| {
+        binding.key == Some(vk)
+            && !binding.modifiers.is_empty()
+            && binding.active.load(Ordering::Relaxed)
+    });
+    slot.store(consume, Ordering::Relaxed);
+    consume
+}
+
 fn satisfied(context: &HookContext, binding: &CompiledBinding) -> bool {
     let held = |vk: u16| {
         context
@@ -238,6 +270,7 @@ mod tests {
             HookContext {
                 sender,
                 keys: (0..VK_COUNT).map(|_| AtomicBool::new(false)).collect(),
+                swallowed: (0..VK_COUNT).map(|_| AtomicBool::new(false)).collect(),
                 bindings: RwLock::new(compile(bindings)),
             },
             receiver,
@@ -281,4 +314,31 @@ mod tests {
             }
         );
     }
+
+    #[test]
+    fn chord_trigger_keys_are_swallowed_but_modifiers_and_escape_are_not() {
+        let bindings = ShortcutBindings::default();
+        let (context, _receiver) = context(&bindings);
+        let ctrl = Modifier::Ctrl.virtual_keys()[0];
+        let alt = Modifier::Alt.virtual_keys()[0];
+        let b = key_to_vk("B").unwrap();
+        for vk in [ctrl, alt, b] {
+            set(&context, vk, true);
+            evaluate(&context);
+        }
+        assert!(!should_swallow(&context, ctrl, true));
+        assert!(should_swallow(&context, b, true));
+        // Auto-repeat while held, then the matching key-up, are consumed too.
+        assert!(should_swallow(&context, b, true));
+        set(&context, b, false);
+        evaluate(&context);
+        assert!(should_swallow(&context, b, false));
+        assert!(!should_swallow(&context, b, false));
+
+        let escape = key_to_vk("Escape").unwrap();
+        set(&context, escape, true);
+        evaluate(&context);
+        assert!(!should_swallow(&context, escape, true));
+    }
+
 }

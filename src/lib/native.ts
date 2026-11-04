@@ -15,7 +15,11 @@ import type {
   AssistantDeltaEvent,
   AssistantStateEvent,
   AssistantConversationTurn,
+  AssistantChatSummary,
+  AssistantChatTurn,
 } from "../types/models";
+
+export type AgentState = "connecting" | "listening" | "thinking" | "speaking" | "ended" | "error";
 
 export const isTauri = (): boolean => "__TAURI_INTERNALS__" in window;
 
@@ -47,6 +51,7 @@ export const defaultSettings: AppSettings = {
     pushToTalk: { modifiers: ["ctrl", "win"], key: null },
     handsFree: { modifiers: ["ctrl", "win"], key: "Space" },
     commandMode: { modifiers: ["ctrl", "alt"], key: "B" },
+    voiceAgent: { modifiers: ["ctrl", "alt"], key: "V" },
     cancel: { modifiers: [], key: "Escape" },
   },
   defaultMode: "push_to_talk",
@@ -63,6 +68,10 @@ export const defaultSettings: AppSettings = {
   ],
   removeFillerWords: true,
   removeFalseStarts: true,
+  cleanupMinWords: 8,
+  keepTranscriptionWarm: true,
+  assistantRememberChats: true,
+  voiceAgentInterruptible: false,
   backtrackingEnabled: true,
   spokenFormattingEnabled: true,
   voiceActionsEnabled: true,
@@ -131,6 +140,8 @@ export const native = {
   history: (query = "") => call<TranscriptRecord[]>("list_transcripts", { query }, []),
   transcript: (id: string) => call<TranscriptRecord>("get_transcript", { id }),
   deleteTranscript: (id: string) => call<void>("delete_transcript", { id }),
+  speakText: (text: string) => call<string>("speak_text", { text }),
+  setTranscriptFavorite: (id: string, favorite: boolean) => call<void>("set_transcript_favorite", { id, favorite }),
   copyText: (text: string) => call<void>("copy_text", { text }),
   pasteTranscript: (id: string) => call<void>("paste_transcript", { id }),
   pasteLatestTranscript: () => call<void>("paste_latest_transcript"),
@@ -168,7 +179,14 @@ export const native = {
   openAssistantDrawer: (screenContext: ScreenContext) => call<void>("open_assistant_drawer", { screenContext }),
   pendingAssistantContext: () => call<ScreenContext | null>("get_pending_assistant_context", undefined, null),
   pendingAssistantVoicePrompt: () => call<string | null>("get_pending_assistant_voice_prompt", undefined, null),
-  askAssistant: (prompt: string, screenContext: ScreenContext | null, history: AssistantConversationTurn[] = []) => call<string>("ask_assistant", { request: { prompt, screenContext, history } }),
+  /** Starts a streamed answer; resolves to the request id (not the answer). */
+  askAssistant: (prompt: string, screenContext: ScreenContext | null, history: AssistantConversationTurn[] = [], chatId: string | null = null) =>
+    call<string>("ask_assistant", { request: { prompt, screenContext, history, chatId } }),
+  startVoiceAgent: () => call<void>("start_voice_agent"),
+  stopVoiceAgent: () => call<void>("stop_voice_agent"),
+  assistantChats: () => call<AssistantChatSummary[]>("list_assistant_chats", undefined, []),
+  assistantChat: (id: string) => call<AssistantChatTurn[]>("get_assistant_chat", { id }, []),
+  deleteAssistantChat: (id: string) => call<void>("delete_assistant_chat", { id }),
 };
 
 export const events = {
@@ -189,6 +207,16 @@ export const events = {
   /** Route changes requested from outside the webview, e.g. the tray's Settings item. */
   navigate: (handler: (route: string) => void): Promise<UnlistenFn> =>
     isTauri() ? listen<string>("navigate", ({ payload }) => handler(payload)) : Promise.resolve(() => undefined),
-  assistantVoicePrompt: (handler: (value: string) => void): Promise<UnlistenFn> =>
-    isTauri() ? listen<string>("assistant-voice-prompt", ({ payload }) => handler(payload)) : Promise.resolve(() => undefined),
+  assistantVoicePrompt: (handler: (value: { prompt: string; screenContext: ScreenContext | null }) => void): Promise<UnlistenFn> =>
+    isTauri()
+      ? listen<{ prompt: string; screenContext: ScreenContext | null }>("assistant-voice-prompt", ({ payload }) => handler(payload))
+      : Promise.resolve(() => undefined),
+  agentState: (handler: (value: { state: AgentState; message: string | null }) => void): Promise<UnlistenFn> =>
+    isTauri() ? listen<{ state: AgentState; message: string | null }>("agent-state", ({ payload }) => handler(payload)) : Promise.resolve(() => undefined),
+  agentTranscript: (handler: (value: { role: string; content: string }) => void): Promise<UnlistenFn> =>
+    isTauri() ? listen<{ role: string; content: string }>("agent-transcript", ({ payload }) => handler(payload)) : Promise.resolve(() => undefined),
+  agentLevel: (handler: (value: number) => void): Promise<UnlistenFn> =>
+    isTauri() ? listen<number>("agent-level", ({ payload }) => handler(payload)) : Promise.resolve(() => undefined),
+  assistantPlacement: (handler: (value: "above" | "below") => void): Promise<UnlistenFn> =>
+    isTauri() ? listen<"above" | "below">("assistant-placement", ({ payload }) => handler(payload)) : Promise.resolve(() => undefined),
 };

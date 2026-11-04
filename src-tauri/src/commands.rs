@@ -70,6 +70,54 @@ pub fn delete_transcript(state: State<'_, AppState>, id: String) -> Result<(), A
 }
 
 #[tauri::command]
+pub fn set_transcript_favorite(
+    state: State<'_, AppState>,
+    id: String,
+    favorite: bool,
+) -> Result<(), AppError> {
+    state.database.set_transcript_favorite(&id, favorite)
+}
+
+/// Reads text aloud with the user's chosen Deepgram Aura voice. Returns MP3
+/// audio as base64 for the WebView to play.
+#[tauri::command]
+pub async fn speak_text(state: State<'_, AppState>, text: String) -> Result<String, AppError> {
+    let voice = state.settings.read().await.assistant_voice.clone();
+    crate::tts::speak(&text, voice.as_deref()).await
+}
+
+#[tauri::command]
+pub async fn start_voice_agent(app: AppHandle, state: State<'_, AppState>) -> Result<(), AppError> {
+    crate::voice_agent::start(&app, &state).await
+}
+
+#[tauri::command]
+pub async fn stop_voice_agent(state: State<'_, AppState>) -> Result<(), AppError> {
+    crate::voice_agent::stop(&state).await;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn list_assistant_chats(
+    state: State<'_, AppState>,
+) -> Result<Vec<crate::database::AssistantChatSummary>, AppError> {
+    state.database.list_assistant_chats()
+}
+
+#[tauri::command]
+pub fn get_assistant_chat(
+    state: State<'_, AppState>,
+    id: String,
+) -> Result<Vec<crate::database::AssistantChatTurn>, AppError> {
+    state.database.get_assistant_chat(&id)
+}
+
+#[tauri::command]
+pub fn delete_assistant_chat(state: State<'_, AppState>, id: String) -> Result<(), AppError> {
+    state.database.delete_assistant_chat(&id)
+}
+
+#[tauri::command]
 pub fn list_dictionary_entries(
     state: State<'_, AppState>,
 ) -> Result<Vec<DictionaryEntry>, AppError> {
@@ -113,6 +161,9 @@ pub async fn save_settings(
     // Rebinding takes effect immediately; the hook thread keeps running.
     crate::shortcuts::update_bindings(&settings.shortcuts);
     *state.settings.write().await = settings.clone();
+    if !settings.keep_transcription_warm {
+        state.set_transcription_standby(None);
+    }
     Ok(settings)
 }
 
@@ -220,8 +271,23 @@ pub async fn transform_text(
 }
 
 #[tauri::command]
-pub fn capture_screen_context() -> Result<ScreenContext, AppError> {
-    crate::context::capture_context()
+pub async fn capture_screen_context(app: AppHandle) -> Result<ScreenContext, AppError> {
+    // The button lives in VoiceFlow's own window, so capturing "the window in
+    // front" would always capture VoiceFlow. Step aside briefly so the app the
+    // user was working in comes back to the front, capture it, then return.
+    let main = app.get_webview_window("main");
+    if let Some(window) = &main {
+        let _ = window.minimize();
+    }
+    tokio::time::sleep(std::time::Duration::from_millis(350)).await;
+    let captured = tokio::task::spawn_blocking(crate::context::capture_context)
+        .await
+        .map_err(|error| AppError::Windows(error.to_string()))?;
+    if let Some(window) = &main {
+        let _ = window.unminimize();
+        let _ = window.set_focus();
+    }
+    captured
 }
 
 #[tauri::command]
@@ -364,14 +430,15 @@ pub async fn open_assistant_drawer(
 pub async fn get_pending_assistant_context(
     state: State<'_, AppState>,
 ) -> Result<Option<ScreenContext>, AppError> {
-    Ok(state.assistant.lock().await.pending_screen_context.clone())
+    // Taken, not cloned: a reopened bubble must not replay an old request.
+    Ok(state.assistant.lock().await.pending_screen_context.take())
 }
 
 #[tauri::command]
 pub async fn get_pending_assistant_voice_prompt(
     state: State<'_, AppState>,
 ) -> Result<Option<String>, AppError> {
-    Ok(state.assistant.lock().await.pending_voice_prompt.clone())
+    Ok(state.assistant.lock().await.pending_voice_prompt.take())
 }
 
 #[tauri::command]
