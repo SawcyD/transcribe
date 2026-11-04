@@ -79,14 +79,17 @@ impl Database {
             if retention_days > 0 {
                 let cutoff = Utc::now() - Duration::days(i64::from(retention_days));
                 removed += connection.execute(
-                    "DELETE FROM transcripts WHERE created_at < ?1",
+                    "DELETE FROM transcripts WHERE created_at < ?1 AND is_favorite = 0",
                     params![cutoff.to_rfc3339()],
                 )?;
             }
             if max_entries > 0 {
                 removed += connection.execute(
-                    r#"DELETE FROM transcripts WHERE id NOT IN (
-                           SELECT id FROM transcripts ORDER BY created_at DESC LIMIT ?1
+                    // Starred transcripts are exempt from retention and don't
+                    // count toward the limit.
+                    r#"DELETE FROM transcripts WHERE is_favorite = 0 AND id NOT IN (
+                           SELECT id FROM transcripts WHERE is_favorite = 0
+                           ORDER BY created_at DESC LIMIT ?1
                        )"#,
                     params![max_entries],
                 )?;
@@ -111,6 +114,16 @@ impl Database {
     pub fn delete_transcript(&self, id: &str) -> Result<(), AppError> {
         self.with_connection(|connection| {
             connection.execute("DELETE FROM transcripts WHERE id = ?1", params![id])?;
+            Ok(())
+        })
+    }
+
+    pub fn set_transcript_favorite(&self, id: &str, favorite: bool) -> Result<(), AppError> {
+        self.with_connection(|connection| {
+            connection.execute(
+                "UPDATE transcripts SET is_favorite = ?2 WHERE id = ?1",
+                params![id, i64::from(favorite)],
+            )?;
             Ok(())
         })
     }

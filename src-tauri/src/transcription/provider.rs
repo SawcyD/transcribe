@@ -117,7 +117,6 @@ mod tests {
             punctuation: true,
             smart_formatting: true,
             dictionary_keyterms: vec![],
-            active_application: None,
             developer_mode: false,
             endpointing_ms: 300,
         };

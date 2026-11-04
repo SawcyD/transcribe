@@ -1,5 +1,6 @@
 mod app_state;
 mod assistant;
+mod assistant_memory;
 mod audio;
 mod brand;
 mod cleanup;
@@ -8,6 +9,8 @@ mod context;
 mod database;
 mod dictation;
 mod errors;
+mod tts;
+mod voice_agent;
 mod insertion;
 mod models;
 mod security;
@@ -70,6 +73,7 @@ pub fn run() {
             let database = database::Database::open(&data_dir.join(DATABASE_FILE))?;
             let settings = database.load_settings()?;
             app.manage(AppState::new(database, settings));
+            tauri::async_runtime::spawn(dictation::warm_up_transcription(app.handle().clone()));
             setup_tray(app)?;
             watch_tray_state(app);
             show_buddy(app);
@@ -87,6 +91,15 @@ pub fn run() {
                     log::debug!("shortcut dispatcher received: {signal:?}");
                     let app = handle.clone();
                     let state = app.state::<AppState>();
+                    // A dictation hotkey while an error is still on the dock
+                    // dismisses it and starts fresh instead of being ignored.
+                    if signal.pressed
+                        && signal.action != ShortcutAction::Cancel
+                        && state.dictation.lock().await.machine.snapshot().state
+                            == DictationState::Error
+                    {
+                        let _ = dictation::cancel(&app, &state).await;
+                    }
                     match (signal.action, signal.pressed) {
                         (ShortcutAction::PushToTalk, true) => {
                             let current = state.dictation.lock().await.machine.snapshot().state;
@@ -196,8 +209,19 @@ pub fn run() {
                                 let _ = dictation::cancel(&app, &state).await;
                             }
                         }
+                        // Press to start a spoken conversation, press again to end it.
+                        (ShortcutAction::VoiceAgent, true) => {
+                            if let Err(error) = voice_agent::toggle(&app, &state).await {
+                                log::warn!(
+                                    "voice agent failed; category={}",
+                                    error.payload().category
+                                );
+                            }
+                        }
                         // Release edges for toggle-style actions carry no meaning.
-                        (ShortcutAction::HandsFree, false) | (ShortcutAction::Cancel, false) => {}
+                        (ShortcutAction::HandsFree, false)
+                        | (ShortcutAction::Cancel, false)
+                        | (ShortcutAction::VoiceAgent, false) => {}
                     }
                 }
                 log::error!("shortcut dispatcher stopped");
@@ -233,6 +257,13 @@ pub fn run() {
             commands::list_transcripts,
             commands::get_transcript,
             commands::delete_transcript,
+            commands::set_transcript_favorite,
+            commands::speak_text,
+            commands::list_assistant_chats,
+            commands::get_assistant_chat,
+            commands::delete_assistant_chat,
+            commands::start_voice_agent,
+            commands::stop_voice_agent,
             commands::list_dictionary_entries,
             commands::dashboard_stats,
             commands::get_settings,

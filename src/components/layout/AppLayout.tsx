@@ -6,6 +6,8 @@ import {
   Info,
   MessageSquare,
   Mic,
+  PanelLeftClose,
+  PanelLeftOpen,
   Settings,
   Wand2,
 } from "lucide-react";
@@ -37,7 +39,14 @@ export function AppLayout() {
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem("voiceflow.navigation.collapsed") === "true" || window.innerWidth < COMPACT_BREAKPOINT);
 
   useEffect(() => {
-    const onResize = () => setCollapsed(window.innerWidth < COMPACT_BREAKPOINT);
+    // Only react when the window crosses the breakpoint, so resizing never
+    // overrides a choice the user made with the sidebar toggle.
+    let narrow = window.innerWidth < COMPACT_BREAKPOINT;
+    const onResize = () => {
+      const next = window.innerWidth < COMPACT_BREAKPOINT;
+      if (next !== narrow) setCollapsed(next);
+      narrow = next;
+    };
     window.addEventListener("resize", onResize);
     return () => window.removeEventListener("resize", onResize);
   }, []);
@@ -73,11 +82,21 @@ export function AppLayout() {
   return (
     <div className={`app-shell${collapsed ? " app-shell--compact" : ""}`}>
       <aside className="navigation-pane">
-        <div className="app-identity" aria-label="VoiceFlow Dev">
+        <div className="app-identity">
           <AudioLines size={16} aria-hidden="true" />
           <strong>VoiceFlow</strong>
+          <button
+            type="button"
+            className="sidebar-toggle"
+            aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+            title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+            aria-expanded={!collapsed}
+            onClick={() => setCollapsed((current) => !current)}
+          >
+            {collapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
+          </button>
         </div>
-        <NavigationView items={MAIN_ITEMS} footerItems={FOOTER_ITEMS} collapsed={collapsed} onToggleCollapse={() => setCollapsed((current) => !current)} />
+        <NavigationView items={MAIN_ITEMS} footerItems={FOOTER_ITEMS} collapsed={collapsed} />
       </aside>
       <main className="content-frame">
         <Outlet />

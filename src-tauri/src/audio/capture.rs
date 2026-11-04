@@ -30,6 +30,54 @@ pub struct CaptureSession {
     visualizer_thread: Option<thread::JoinHandle<()>>,
     samples: Arc<Mutex<Vec<i16>>>,
     pub format: AudioFormat,
+    /// Rate of the PCM sent to the transcription provider. Speech models are
+    /// tuned for 16 kHz, so higher device rates are downsampled before upload.
+    pub stream_sample_rate: u32,
+}
+
+/// Target rate for streamed audio. 48 kHz devices would otherwise upload 3x
+/// the bytes with no accuracy gain, which shows up as latency on weak Wi-Fi.
+pub const STREAM_SAMPLE_RATE: u32 = 16_000;
+
+/// Averaging decimator: each output sample is the mean of the input samples
+/// in its window, which doubles as a cheap anti-aliasing low-pass for speech.
+/// State carries across callbacks so non-integer ratios (44.1k -> 16k) stay
+/// phase-correct.
+pub(crate) struct Downsampler {
+    step: f64,
+    phase: f64,
+    sum: i64,
+    count: i64,
+}
+
+impl Downsampler {
+    pub(crate) fn new(source_rate: u32, target_rate: u32) -> Self {
+        Self {
+            step: (source_rate as f64 / target_rate.max(1) as f64).max(1.0),
+            phase: 0.0,
+            sum: 0,
+            count: 0,
+        }
+    }
+
+    pub(crate) fn process(&mut self, input: &[i16]) -> Vec<i16> {
+        if self.step <= 1.0 {
+            return input.to_vec();
+        }
+        let mut output = Vec::with_capacity((input.len() as f64 / self.step) as usize + 1);
+        for &sample in input {
+            self.sum += sample as i64;
+            self.count += 1;
+            self.phase += 1.0;
+            if self.phase >= self.step {
+                output.push((self.sum / self.count) as i16);
+                self.sum = 0;
+                self.count = 0;
+                self.phase -= self.step;
+            }
+        }
+        output
+    }
 }
 
 pub struct CapturedAudio {
@@ -80,7 +128,11 @@ impl CaptureSession {
             sample_rate: config.sample_rate.0,
         };
         let source_channels = config.channels as usize;
-        let (sender, receiver) = mpsc::channel::<Vec<u8>>(256);
+        let stream_sample_rate = format.sample_rate.min(STREAM_SAMPLE_RATE);
+        // The provider socket connects *after* the mic starts. Callbacks arrive
+        // roughly every 10 ms, so 256 slots (~2.5 s) could overflow on a slow
+        // handshake and silently drop the first words. 4096 is ~40 s of slack.
+        let (sender, receiver) = mpsc::channel::<Vec<u8>>(4096);
         let samples = Arc::new(Mutex::new(Vec::with_capacity(
             format.sample_rate as usize * 60,
         )));
@@ -93,6 +145,7 @@ impl CaptureSession {
                 &device,
                 &config,
                 source_channels,
+                Downsampler::new(format.sample_rate, stream_sample_rate),
                 sender,
                 &samples,
                 &latest_rms,
@@ -102,6 +155,7 @@ impl CaptureSession {
                 &device,
                 &config,
                 source_channels,
+                Downsampler::new(format.sample_rate, stream_sample_rate),
                 sender,
                 &samples,
                 &latest_rms,
@@ -111,6 +165,7 @@ impl CaptureSession {
                 &device,
                 &config,
                 source_channels,
+                Downsampler::new(format.sample_rate, stream_sample_rate),
                 sender,
                 &samples,
                 &latest_rms,
@@ -169,6 +224,7 @@ impl CaptureSession {
                 visualizer_thread: Some(visualizer),
                 samples,
                 format,
+                stream_sample_rate,
             },
             receiver,
         ))
@@ -196,6 +252,7 @@ impl CaptureSession {
 
 fn process_samples(
     mono: Vec<i16>,
+    downsampler: &mut Downsampler,
     sender: &mpsc::Sender<Vec<u8>>,
     stored: &Arc<Mutex<Vec<i16>>>,
     latest_rms: &Arc<AtomicU32>,
@@ -209,11 +266,19 @@ fn process_samples(
     if let Ok(mut buffer) = stored.lock() {
         buffer.extend_from_slice(&mono);
     }
-    let mut bytes = Vec::with_capacity(mono.len() * 2);
-    for sample in mono {
+    let streamed = downsampler.process(&mono);
+    if streamed.is_empty() {
+        return;
+    }
+    let mut bytes = Vec::with_capacity(streamed.len() * 2);
+    for sample in streamed {
         bytes.extend_from_slice(&sample.to_le_bytes());
     }
-    let _ = sender.try_send(bytes);
+    // A closed channel means the provider session ended; only a full buffer
+    // is worth a warning.
+    if let Err(mpsc::error::TrySendError::Full(_)) = sender.try_send(bytes) {
+        log::warn!("audio stream buffer full; dropping a chunk");
+    }
 }
 
 fn downmix_f32(data: &[f32], channels: usize) -> Vec<i16> {
@@ -248,6 +313,7 @@ macro_rules! build_stream {
             device: &cpal::Device,
             config: &StreamConfig,
             channels: usize,
+            mut downsampler: Downsampler,
             sender: mpsc::Sender<Vec<u8>>,
             stored: &Arc<Mutex<Vec<i16>>>,
             latest_rms: &Arc<AtomicU32>,
@@ -262,6 +328,7 @@ macro_rules! build_stream {
                     move |data: &[$sample], _| {
                         process_samples(
                             $downmix(data, channels),
+                            &mut downsampler,
                             &sender,
                             &stored,
                             &latest_rms,
@@ -279,3 +346,31 @@ macro_rules! build_stream {
 build_stream!(build_f32_stream, f32, downmix_f32);
 build_stream!(build_i16_stream, i16, downmix_i16);
 build_stream!(build_u16_stream, u16, downmix_u16);
+
+#[cfg(test)]
+mod tests {
+    use super::Downsampler;
+
+    #[test]
+    fn downsamples_48k_to_16k_by_averaging() {
+        let mut downsampler = Downsampler::new(48_000, 16_000);
+        let output = downsampler.process(&[3, 6, 9, 30, 30, 30, -3, -3, -3]);
+        assert_eq!(output, vec![6, 30, -3]);
+    }
+
+    #[test]
+    fn keeps_phase_across_callbacks_for_fractional_ratios() {
+        let mut downsampler = Downsampler::new(44_100, 16_000);
+        let total: usize = (0..100)
+            .map(|_| downsampler.process(&[0; 441]).len())
+            .sum();
+        // 44_100 input samples must become ~16_000 output samples.
+        assert!((15_999..=16_000).contains(&total), "{total}");
+    }
+
+    #[test]
+    fn passes_through_rates_at_or_below_target() {
+        let mut downsampler = Downsampler::new(16_000, 16_000);
+        assert_eq!(downsampler.process(&[1, 2, 3]), vec![1, 2, 3]);
+    }
+}

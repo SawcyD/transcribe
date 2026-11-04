@@ -38,7 +38,8 @@ impl AppError {
                 ("state", true)
             }
             Self::Microphone(_) => ("microphone", true),
-            Self::Transcription(_) | Self::EmptyTranscript => ("transcription", true),
+            Self::Transcription(_) => ("transcription", true),
+            Self::EmptyTranscript => ("empty_transcript", true),
             Self::Cleanup(_) => ("cleanup", true),
             Self::Insertion(_) => ("insertion", true),
             Self::Database(_) => ("database", true),

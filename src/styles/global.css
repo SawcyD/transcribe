@@ -371,26 +371,36 @@ kbd { display: inline-flex; align-items: center; justify-content: center; min-wi
 .privacy-note { display: flex; align-items: flex-start; gap: 11px; padding: 15px 17px; color: #93a0ad; border-radius: 14px; background: rgba(141,241,189,.04); box-shadow: 0 0 0 1px rgba(141,241,189,.08); font-size: 9px; line-height: 1.6; }
 .privacy-note svg { flex: 0 0 auto; color: var(--mint); }
 
-/* --- Recording overlay: compact Windows 11 surface --- */
-.overlay-surface { position: relative; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 10px; width: 100vw; height: 100vh; padding: 0 10px; overflow: hidden; border-radius: var(--corner-overlay); background: color-mix(in srgb, var(--memora-acrylic) 76%, rgb(12 14 18 / .92)); box-shadow: 0 10px 28px rgba(0, 0, 0, .38), 0 0 0 1px color-mix(in srgb, var(--ink) 18%, transparent), inset 0 1px 0 rgba(255, 255, 255, .1); backdrop-filter: blur(30px) saturate(1.1); -webkit-backdrop-filter: blur(30px) saturate(1.1); user-select: none; }
-.overlay-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--faint); }
-.overlay-dot--listening { background: var(--accent); }
-.overlay-dot--processing { background: #e8b339; }
+/* --- Recording overlay: a single-row pill --- */
+.overlay-surface { position: relative; display: flex; align-items: center; gap: 10px; width: 100vw; height: 100vh; padding: 0 8px 0 16px; overflow: hidden; border-radius: 999px; background: color-mix(in srgb, var(--memora-acrylic) 70%, rgb(14 16 20 / .94)); box-shadow: 0 0 0 1px color-mix(in srgb, var(--ink) 14%, transparent), inset 0 1px 0 rgba(255, 255, 255, .08); backdrop-filter: blur(30px) saturate(1.1); -webkit-backdrop-filter: blur(30px) saturate(1.1); user-select: none; transition: box-shadow 160ms; }
+.overlay-surface--error { box-shadow: 0 0 0 1px color-mix(in srgb, var(--danger) 55%, transparent), inset 0 1px 0 rgba(255, 255, 255, .06); }
+.overlay-surface--success { box-shadow: 0 0 0 1px color-mix(in srgb, #6ccb6c 45%, transparent), inset 0 1px 0 rgba(255, 255, 255, .06); }
+.overlay-dot { position: relative; flex: 0 0 auto; display: grid; place-items: center; width: 8px; height: 8px; border-radius: 50%; background: var(--faint); }
+.overlay-dot--listening { background: var(--accent); box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 60%, transparent); animation: overlay-pulse 1.6s ease-out infinite; }
+.overlay-dot--processing { background: transparent; }
 .overlay-dot--success { background: #6ccb6c; }
 .overlay-dot--error { background: var(--danger); }
-.overlay-body { display: grid; gap: 2px; min-width: 0; }
-.overlay-line { display: flex; align-items: center; gap: 8px; min-width: 0; }
-.overlay-label { overflow: hidden; color: var(--ink); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
-.overlay-timer { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
-.overlay-detail { overflow: hidden; color: var(--muted); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
-.overlay-spinner { flex: 0 0 auto; width: 12px; height: 12px; border: 2px solid var(--control-active); border-top-color: var(--accent); border-radius: 50%; animation: spin 700ms linear infinite; }
-/* Controls stay out of the way until the overlay is hovered or focused. */
-.overlay-actions { display: flex; gap: 2px; opacity: 0; transition: opacity 120ms; }
-.overlay-surface:hover .overlay-actions, .overlay-actions:focus-within { opacity: 1; }
-.overlay-button { display: grid; place-items: center; width: 26px; height: 26px; padding: 0; color: var(--muted); background: transparent; border: 0; border-radius: var(--corner-small); cursor: pointer; transition: background-color 120ms, color 120ms; }
+@keyframes overlay-pulse { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 55%, transparent); } 100% { box-shadow: 0 0 0 7px transparent; } }
+.overlay-body { flex: 1 1 auto; min-width: 0; }
+.overlay-line { display: flex; align-items: baseline; gap: 6px; min-width: 0; white-space: nowrap; }
+.overlay-label { flex: 0 0 auto; color: var(--ink); font-size: 12.5px; font-weight: 600; }
+.overlay-detail { min-width: 0; overflow: hidden; color: var(--muted); font-size: 12px; text-overflow: ellipsis; }
+.overlay-detail::before { content: "· "; }
+/* RTL box + LTR <bdi> text: overflow clips (with an ellipsis) on the left, so
+   the newest words at the end of the live transcript stay visible. */
+.overlay-caption { display: block; overflow: hidden; direction: rtl; color: var(--ink); font-size: 12.5px; text-align: left; text-overflow: ellipsis; white-space: nowrap; }
+.overlay-caption bdi { direction: ltr; unicode-bidi: isolate; }
+.overlay-wave { flex: 0 0 56px; }
+.overlay-timer { flex: 0 0 auto; color: var(--muted); font-size: 11.5px; font-variant-numeric: tabular-nums; }
+.overlay-spinner { width: 12px; height: 12px; border: 2px solid var(--control-active); border-top-color: var(--accent); border-radius: 50%; animation: spin 700ms linear infinite; }
+.overlay-actions { display: flex; flex: 0 0 auto; gap: 2px; }
+/* Cancel stays out of the way until the pill is hovered or focused. */
+.overlay-button--hover { opacity: 0; transition: opacity 120ms; }
+.overlay-surface:hover .overlay-button--hover, .overlay-actions:focus-within .overlay-button--hover { opacity: 1; }
+.overlay-button { display: grid; place-items: center; width: 28px; height: 28px; padding: 0; color: var(--muted); background: transparent; border: 0; border-radius: 50%; cursor: pointer; transition: background-color 120ms, color 120ms, opacity 120ms; }
 .overlay-button:hover { color: var(--ink); background: var(--control-hover); }
 .overlay-button:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -1px; }
-.overlay-button--finish { color: #6ccb6c; }
+.overlay-button--finish { color: #6ccb6c; background: color-mix(in srgb, #6ccb6c 14%, transparent); }
 .overlay-button--cancel:hover { color: var(--danger); }
 .audio-wave { display: flex; align-items: center; gap: 2px; height: 12px; }
 .audio-wave-bar { flex: 1 1 auto; min-width: 2px; height: 100%; border-radius: 1px; background: var(--accent); opacity: .85; transform: scaleY(var(--wave-scale)); transform-origin: center; transition: transform 90ms cubic-bezier(.2, 0, 0, 1); }
@@ -477,9 +487,6 @@ kbd { display: inline-flex; align-items: center; justify-content: center; min-wi
 .voiceflow-settings-row-button { display: block; width: 100%; padding: 0; border: 0; background: transparent; color: inherit; text-align: left; }
 .voiceflow-settings-row-button:hover .memora-settings-row { background: var(--memora-subtle-hover); }
 .voiceflow-command-bar { margin-bottom: 14px; border: 1px solid var(--memora-stroke); border-radius: var(--memora-radius-lg); background: var(--memora-card); }
-.history-list:has(.voiceflow-history-grid) { overflow: auto; border: 0; background: transparent; }
-.history-list:has(.voiceflow-history-grid) .history-scroll { display: none; }
-.voiceflow-history-grid { min-width: 780px; }
 .voiceflow-status-rows { display: grid; gap: 2px; margin-top: 10px; max-width: 420px; }
 .status-panel .memora-progress { margin-top: 12px; max-width: 420px; }
 
@@ -527,7 +534,7 @@ kbd { display: inline-flex; align-items: center; justify-content: center; min-wi
   *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
   /* Overlay controls are the only way to finish or cancel, so they must stay
      visible when the hover transition that reveals them is suppressed. */
-  .overlay-actions { opacity: 1; }
+  .overlay-button--hover { opacity: 1; }
 }
 
 /* Windows high-contrast themes replace the palette entirely. Borders are forced

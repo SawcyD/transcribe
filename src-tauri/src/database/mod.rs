@@ -1,7 +1,10 @@
+mod assistant_chats;
 mod dictionary;
 mod migrations;
 mod settings;
 mod transcripts;
+
+pub use assistant_chats::{AssistantChatSummary, AssistantChatTurn};
 
 use std::{
     path::Path,

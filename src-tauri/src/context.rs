@@ -7,14 +7,78 @@ use windows::Win32::{
     Foundation::{POINT, RECT},
     Graphics::Gdi::{
         BitBlt, CreateCompatibleBitmap, CreateCompatibleDC, DeleteDC, DeleteObject, GetDC,
-        GetDIBits, GetMonitorInfoW, MonitorFromPoint, ReleaseDC, SelectObject, BITMAPINFO,
+        GetDIBits, GetMonitorInfoW, MonitorFromPoint, MonitorFromWindow, ReleaseDC, SelectObject,
+        BITMAPINFO,
         BITMAPINFOHEADER, BI_RGB, CAPTUREBLT, DIB_RGB_COLORS, HGDIOBJ, MONITORINFO,
         MONITOR_DEFAULTTONEAREST, SRCCOPY,
     },
-    UI::WindowsAndMessaging::GetCursorPos,
+    Foundation::HWND,
+    UI::WindowsAndMessaging::{GetCursorPos, GetWindowRect, IsIconic, IsWindow},
 };
 
-use crate::{errors::AppError, insertion};
+use crate::{errors::AppError, insertion, models::ActiveTarget};
+
+/// Below this size a window crop is more confusing than helpful (tool
+/// windows, tiny dialogs), so the whole monitor is captured instead.
+const MIN_WINDOW_CAPTURE: i32 = 240;
+
+/// Captures the window the user was working in when they pressed the
+/// shortcut — not whatever is in front *now*, which could be VoiceFlow's own
+/// dock or main window. The image is cropped to that window so the assistant
+/// focuses on it, falling back to its whole monitor for tiny/minimised windows.
+pub fn capture_target_context(target: &ActiveTarget) -> Result<ScreenContext, AppError> {
+    let window = HWND(target.window_handle as *mut c_void);
+    let (rect, monitor_rect) = unsafe {
+        if !IsWindow(Some(window)).as_bool() {
+            return capture_context();
+        }
+        let monitor = MonitorFromWindow(window, MONITOR_DEFAULTTONEAREST);
+        let mut info = MONITORINFO {
+            cbSize: std::mem::size_of::<MONITORINFO>() as u32,
+            ..Default::default()
+        };
+        if monitor.0.is_null() || !GetMonitorInfoW(monitor, &mut info).as_bool() {
+            return capture_context();
+        }
+        let monitor_rect = info.rcMonitor;
+        let mut window_rect = RECT::default();
+        let usable = !IsIconic(window).as_bool() && GetWindowRect(window, &mut window_rect).is_ok();
+        // Clamp to the monitor so off-screen parts don't capture as black.
+        let clamped = RECT {
+            left: window_rect.left.max(monitor_rect.left),
+            top: window_rect.top.max(monitor_rect.top),
+            right: window_rect.right.min(monitor_rect.right),
+            bottom: window_rect.bottom.min(monitor_rect.bottom),
+        };
+        let big_enough = clamped.right - clamped.left >= MIN_WINDOW_CAPTURE
+            && clamped.bottom - clamped.top >= MIN_WINDOW_CAPTURE;
+        (if usable && big_enough { clamped } else { monitor_rect }, monitor_rect)
+    };
+    let mut cursor = POINT::default();
+    unsafe {
+        let _ = GetCursorPos(&mut cursor);
+    }
+    let width = (rect.right - rect.left).max(1) as u32;
+    let height = (rect.bottom - rect.top).max(1) as u32;
+    let (pixels, screenshot_width, screenshot_height) = capture_monitor(rect, width, height)?;
+    let screenshot_data_url = encode_png_data_url(&pixels, screenshot_width, screenshot_height)?;
+    Ok(ScreenContext {
+        application: target.application_name.clone(),
+        process_name: target.process_name.clone(),
+        window_title: target.window_title.clone(),
+        cursor_x: cursor.x,
+        cursor_y: cursor.y,
+        monitor: ScreenRect {
+            left: monitor_rect.left,
+            top: monitor_rect.top,
+            width: (monitor_rect.right - monitor_rect.left).max(1) as u32,
+            height: (monitor_rect.bottom - monitor_rect.top).max(1) as u32,
+        },
+        screenshot_data_url,
+        screenshot_width,
+        screenshot_height,
+    })
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

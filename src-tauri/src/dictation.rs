@@ -21,7 +21,7 @@ use crate::{
         TranscriptionConfig,
     },
     security::{self, CredentialKind},
-    transcription::{DeepgramProvider, ProviderEvent, TranscriptionProvider},
+    transcription::{self, DeepgramProvider, ProviderEvent, TranscriptionProvider},
     transforms::{self, TransformRequest},
 };
 
@@ -76,29 +76,22 @@ pub async fn start(
             return Err(error);
         }
     };
-    let config = TranscriptionConfig {
-        language: settings.language.clone(),
-        model: settings.transcription_model.clone(),
-        sample_rate: capture.format.sample_rate,
-        encoding: "linear16".into(),
-        interim_results: true,
-        punctuation: true,
-        smart_formatting: true,
-        dictionary_keyterms: keyterms,
-        active_application: target.process_name.clone(),
-        // A code-oriented cleanup style is the signal that this app wants the
-        // developer transcription profile too.
-        developer_mode: matches!(
-            settings
-                .cleanup_style_for(target.process_name.as_deref())
-                .as_str(),
-            "developer" | "code_literal"
-        ),
-        endpointing_ms: 300,
-    };
+    let config = transcription_config(
+        &settings,
+        keyterms,
+        capture.stream_sample_rate,
+        target.process_name.as_deref(),
+    );
     let (event_sender, event_receiver) = mpsc::unbounded_channel();
     spawn_interim_forwarder(app.clone(), session_id.clone(), event_receiver);
-    let transcription = tokio::spawn(stream_transcription(receiver, config, event_sender));
+    let standby = state.take_transcription_standby();
+    let transcription = tokio::spawn(stream_transcription(
+        app.clone(),
+        receiver,
+        config,
+        event_sender,
+        standby,
+    ));
 
     {
         let mut runtime = state.dictation.lock().await;
@@ -212,17 +205,6 @@ pub async fn finish(app: &AppHandle, state: &AppState) -> Result<DictationSnapsh
         let prompt = finish_sentence(&resolve_explicit_backtracking(
             transcription.raw_text.trim(),
         ));
-        let screen_context = if command_needs_screen_context(&prompt) {
-            match crate::context::capture_context() {
-                Ok(context) => Some(context),
-                Err(error) => {
-                    log::debug!("Buddy screen context was unavailable: {error}");
-                    None
-                }
-            }
-        } else {
-            None
-        };
         {
             let mut runtime = state.dictation.lock().await;
             runtime.machine.transition(DictationState::Cleaning)?;
@@ -230,7 +212,27 @@ pub async fn finish(app: &AppHandle, state: &AppState) -> Result<DictationSnapsh
             runtime.machine.transition(DictationState::Completed)?;
         }
         emit_snapshot(app, state).await;
+        // Hide the dock first so it isn't in the screenshot.
         hide_overlay(app);
+        // Command Mode is "explain what I'm looking at", so it always looks
+        // (the old keyword guessing missed most questions) unless the user
+        // turned screen context off. It captures the window that was focused
+        // when the shortcut was pressed, not whatever is in front now.
+        let allow_screen = state.settings.read().await.assistant_allow_screen_context;
+        let screen_context = if allow_screen {
+            tokio::time::sleep(std::time::Duration::from_millis(120)).await;
+            let target = active.target.clone();
+            match tokio::task::spawn_blocking(move || crate::context::capture_target_context(&target)).await {
+                Ok(Ok(context)) => Some(context),
+                Ok(Err(error)) => {
+                    log::debug!("screen context was unavailable: {error}");
+                    None
+                }
+                Err(_) => None,
+            }
+        } else {
+            None
+        };
         {
             let mut runtime = state.dictation.lock().await;
             runtime.machine.transition(DictationState::Idle)?;
@@ -247,9 +249,20 @@ pub async fn finish(app: &AppHandle, state: &AppState) -> Result<DictationSnapsh
     }
     emit_snapshot(app, state).await;
     let settings = state.settings.read().await.clone();
-    let entries = state.database.enabled_dictionary_entries()?;
+    // Dictionary problems degrade to "no dictionary" rather than stranding the
+    // session in Cleaning with a spinner that never goes away.
+    let entries = state
+        .database
+        .enabled_dictionary_entries()
+        .unwrap_or_else(|error| {
+            log::warn!(
+                "dictionary unavailable; category={}",
+                error.payload().category
+            );
+            Vec::new()
+        });
     let raw = transcription.raw_text.trim().to_string();
-    let normalized = apply_dictionary(&raw, &entries)?;
+    let normalized = apply_dictionary(&raw, &entries).unwrap_or_else(|_| raw.clone());
     let structured = if settings.spoken_formatting_enabled {
         normalize_spoken_structure(&normalized)
     } else {
@@ -301,22 +314,31 @@ pub async fn finish(app: &AppHandle, state: &AppState) -> Result<DictationSnapsh
             sanitize_transcription_formatting(&voice_action.text)
         }
     };
-    let mut final_text =
-        sanitize_transcription_formatting(&apply_dictionary(&finish_sentence(&cleaned), &entries)?);
+    let finished = finish_sentence(&cleaned);
+    let mut final_text = sanitize_transcription_formatting(
+        &apply_dictionary(&finished, &entries).unwrap_or(finished.clone()),
+    );
     let transform_id = settings
         .auto_apply_transform
         .clone()
         .filter(|value| !value.trim().is_empty());
     if let Some(transform_id) = transform_id.as_deref() {
-        let transformed = transforms::apply_transform(
+        match transforms::apply_transform(
             TransformRequest {
                 text: final_text.clone(),
                 transform_id: transform_id.into(),
             },
             &settings,
         )
-        .await?;
-        final_text = transformed.transformed_text;
+        .await
+        {
+            Ok(transformed) => final_text = transformed.transformed_text,
+            // Insert the cleaned dictation rather than losing it to a transform.
+            Err(error) => log::warn!(
+                "auto-transform skipped; category={}",
+                error.payload().category
+            ),
+        }
     }
     final_text = sanitize_transcription_formatting(&final_text);
     if active.mode == DictationMode::Call {
@@ -411,6 +433,7 @@ pub async fn finish(app: &AppHandle, state: &AppState) -> Result<DictationSnapsh
     }
 
     // Captured before the record is consumed by the save path below.
+    let record_final_text = record.final_transcript.clone();
     let inserted_word_count = record.final_transcript.split_whitespace().count();
     let inserted_application = record
         .application_name
@@ -431,9 +454,12 @@ pub async fn finish(app: &AppHandle, state: &AppState) -> Result<DictationSnapsh
             record.cleaned_transcript.clear();
         }
         if let Err(error) = state.database.insert_transcript(&record) {
-            retain_failed_audio(state, &active.id, captured).await;
-            set_error(app, state, error.payload()).await;
-            return Err(error);
+            // The text has already been delivered; a History write failure
+            // must not be reported to the user as a failed paste.
+            log::warn!(
+                "history save failed after insertion; category={}",
+                error.payload().category
+            );
         }
         if let Err(error) = state
             .database
@@ -470,6 +496,8 @@ pub async fn finish(app: &AppHandle, state: &AppState) -> Result<DictationSnapsh
     {
         let mut runtime = state.dictation.lock().await;
         runtime.recovery_audio = None;
+        // The dock's success state shows what was actually delivered.
+        runtime.machine.set_interim(record_final_text);
         runtime.machine.transition(DictationState::Completed)?;
     }
     emit_snapshot(app, state).await;
@@ -571,20 +599,98 @@ pub async fn cancel(app: &AppHandle, state: &AppState) -> Result<DictationSnapsh
     Ok(state.dictation.lock().await.machine.snapshot())
 }
 
+fn transcription_config(
+    settings: &crate::models::AppSettings,
+    keyterms: Vec<String>,
+    sample_rate: u32,
+    process_name: Option<&str>,
+) -> TranscriptionConfig {
+    TranscriptionConfig {
+        language: settings.language.clone(),
+        model: settings.transcription_model.clone(),
+        sample_rate,
+        encoding: "linear16".into(),
+        interim_results: true,
+        punctuation: true,
+        smart_formatting: true,
+        dictionary_keyterms: keyterms,
+        // A code-oriented cleanup style is the signal that this app wants the
+        // developer transcription profile too.
+        developer_mode: matches!(
+            settings.cleanup_style_for(process_name).as_str(),
+            "developer" | "code_literal"
+        ),
+        endpointing_ms: 300,
+    }
+}
+
 async fn stream_transcription(
+    app: AppHandle,
     mut receiver: mpsc::Receiver<Vec<u8>>,
     config: TranscriptionConfig,
     event_sender: mpsc::UnboundedSender<ProviderEvent>,
+    standby: Option<transcription::Standby>,
 ) -> Result<crate::models::TranscriptionResult, AppError> {
     let api_key = tokio::task::spawn_blocking(|| security::get(CredentialKind::Deepgram))
         .await
         .map_err(|error| AppError::Credential(error.to_string()))??;
-    let provider = DeepgramProvider::new(api_key, event_sender);
-    let session = provider.start_session(config).await?;
+    let provider = DeepgramProvider::new(api_key.clone(), event_sender).with_standby(standby);
+    let session = provider.start_session(config.clone()).await?;
+    let mut result = Ok(());
     while let Some(chunk) = receiver.recv().await {
-        provider.send_audio(&session, &chunk).await?;
+        if let Err(error) = provider.send_audio(&session, &chunk).await {
+            result = Err(error);
+            break;
+        }
     }
-    provider.finish_session(session).await
+    let outcome = match result {
+        Ok(()) => provider.finish_session(session).await,
+        Err(error) => Err(error),
+    };
+    // Open the next session's connection now, while nobody is waiting on it.
+    tauri::async_runtime::spawn(prepare_standby(app, config, api_key));
+    outcome
+}
+
+/// Opens and parks a connection for the next dictation, assuming it will look
+/// like the one just used (same app profile, sample rate and dictionary).
+async fn prepare_standby(app: AppHandle, config: TranscriptionConfig, api_key: String) {
+    let state = app.state::<AppState>();
+    if !state.settings.read().await.keep_transcription_warm {
+        return;
+    }
+    let key = transcription::connection_key(&config, &api_key);
+    match transcription::connect(&config, &api_key).await {
+        Ok(socket) => {
+            state.set_transcription_standby(Some(transcription::Standby::keep_alive(key, socket)));
+            log::debug!("deepgram standby connection ready");
+        }
+        Err(error) => log::debug!(
+            "deepgram standby connection failed; category={}",
+            error.payload().category
+        ),
+    }
+}
+
+/// Warms a connection at launch so even the first dictation skips the
+/// handshake. Uses the default app profile and the 16 kHz stream rate.
+pub async fn warm_up_transcription(app: AppHandle) {
+    let state = app.state::<AppState>();
+    let settings = state.settings.read().await.clone();
+    if !settings.keep_transcription_warm {
+        return;
+    }
+    let Ok(keyterms) = state.database.dictionary_keyterms() else {
+        return;
+    };
+    let Ok(Ok(api_key)) =
+        tokio::task::spawn_blocking(|| security::get(CredentialKind::Deepgram)).await
+    else {
+        // No key configured yet: nothing to warm.
+        return;
+    };
+    let config = transcription_config(&settings, keyterms, audio::STREAM_SAMPLE_RATE, None);
+    prepare_standby(app.clone(), config, api_key).await;
 }
 
 fn spawn_interim_forwarder(
@@ -654,6 +760,15 @@ async fn run_cleanup(
         settings.cleanup_model.clone(),
     )?;
     let style = settings.cleanup_style_for(active_process);
+    if !needs_ai_cleanup(text, &style, settings.cleanup_min_words) {
+        log::debug!("short dictation; skipping AI cleanup round trip");
+        return Ok(CleanupResult {
+            cleaned_text: text.to_string(),
+            corrections_applied: vec![],
+            post_paste_action: PostPasteAction::None,
+            confidence: 1.0,
+        });
+    }
     if style == "balanced" {
         provider.cleanup(text, protected_terms).await
     } else {
@@ -663,9 +778,77 @@ async fn run_cleanup(
     }
 }
 
+/// How long an error stays on the dock before the app returns to Idle.
+const ERROR_DISMISS_MS: u64 = 4_500;
+
+/// Spoken words that only the AI cleanup turns into code ("snake case user
+/// id" -> `user_id`). Short dictations containing them still go to the AI.
+const CODE_CUES: [&str; 14] = [
+    "case", "underscore", "dot", "paren", "bracket", "brace", "slash", "backslash",
+    "equals", "arrow", "colon", "semicolon", "backtick", "quote",
+];
+
+/// Short dictations ("sounds good", "git status") come back from deterministic
+/// cleanup essentially final, so waiting on a second network round trip only
+/// adds latency. The deterministic pass (dictionary, fillers, backtracking,
+/// punctuation) still runs either way.
+fn needs_ai_cleanup(text: &str, style: &str, min_words: u32) -> bool {
+    let words: Vec<String> = text
+        .split_whitespace()
+        .map(|word| {
+            word.trim_matches(|c: char| !c.is_alphanumeric())
+                .to_ascii_lowercase()
+        })
+        .filter(|word| !word.is_empty())
+        .collect();
+    if min_words == 0 || words.len() >= min_words as usize {
+        return true;
+    }
+    let code_style = matches!(style, "developer" | "code_literal");
+    code_style
+        && words
+            .iter()
+            .any(|word| CODE_CUES.contains(&word.as_str()) || word.ends_with("case"))
+}
+
 async fn set_error(app: &AppHandle, state: &AppState, error: AppErrorPayload) {
-    state.dictation.lock().await.machine.fail(error);
+    let session_id = {
+        let mut runtime = state.dictation.lock().await;
+        runtime.machine.fail(error);
+        runtime.machine.snapshot().session_id
+    };
     emit_snapshot(app, state).await;
+    schedule_error_dismiss(app.clone(), session_id);
+}
+
+/// Errors used to be sticky: the hotkey only starts from Idle, so after any
+/// failure the next Ctrl+Win silently did nothing until Escape was pressed.
+/// Clear the error automatically once the user has had time to read it.
+fn schedule_error_dismiss(app: AppHandle, session_id: Option<String>) {
+    tauri::async_runtime::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_millis(ERROR_DISMISS_MS)).await;
+        let state = app.state::<AppState>();
+        let dismissed = {
+            let mut runtime = state.dictation.lock().await;
+            let snapshot = runtime.machine.snapshot();
+            if snapshot.state == DictationState::Error && snapshot.session_id == session_id {
+                if let Some(mut active) = runtime.active.take() {
+                    active.transcription.abort();
+                    if let Some(capture) = active.capture.take() {
+                        drop(capture.stop());
+                    }
+                }
+                runtime.machine.reset();
+                true
+            } else {
+                false
+            }
+        };
+        if dismissed {
+            hide_overlay(&app);
+            emit_snapshot(&app, &state).await;
+        }
+    });
 }
 
 async fn retain_failed_audio(state: &AppState, session_id: &str, audio: CapturedAudio) {
@@ -698,8 +881,8 @@ async fn emit_snapshot(app: &AppHandle, state: &AppState) {
     let _ = app.emit("dictation-state", snapshot);
 }
 
-const OVERLAY_WIDTH: u32 = 260;
-const OVERLAY_HEIGHT: u32 = 44;
+const OVERLAY_WIDTH: u32 = 360;
+const OVERLAY_HEIGHT: u32 = 48;
 const OVERLAY_MARGIN: u32 = 56;
 
 fn show_overlay(app: &AppHandle, settings: &crate::models::AppSettings) -> Result<(), AppError> {
@@ -809,15 +992,21 @@ fn sanitize_transcription_formatting(input: &str) -> String {
 }
 
 fn normalize_spoken_structure(input: &str) -> String {
+    use std::sync::OnceLock;
+    static CUES: OnceLock<[(regex::Regex, &'static str); 3]> = OnceLock::new();
+    let cues = CUES.get_or_init(|| {
+        // Whole words only, any case: "bulletin" and "Newline-delimited" are
+        // ordinary words, not formatting commands.
+        let cue = |pattern: &str| regex::Regex::new(&format!(r"(?i)\b(?:{pattern})\b")).unwrap();
+        [
+            (cue("new paragraph|next paragraph"), "\n\n"),
+            (cue("new line|next line"), "\n"),
+            (cue("bullet point|bullet|next point"), "\n- "),
+        ]
+    });
     let mut value = input.to_string();
-    for cue in ["new paragraph", "next paragraph"] {
-        value = value.replace(cue, "\n\n");
-    }
-    for cue in ["new line", "next line"] {
-        value = value.replace(cue, "\n");
-    }
-    for cue in ["bullet point", "bullet", "next point"] {
-        value = value.replace(cue, "\n- ");
+    for (pattern, replacement) in cues {
+        value = pattern.replace_all(&value, *replacement).into_owned();
     }
     value
 }
@@ -833,23 +1022,6 @@ fn format_call_notes(text: &str, application: &str) -> String {
     }
 }
 
-
-fn command_needs_screen_context(prompt: &str) -> bool {
-    let normalized = prompt.to_ascii_lowercase();
-    [
-        "explain this",
-        "look at this",
-        "what am i looking at",
-        "what's on my screen",
-        "what is on my screen",
-        "summarize this",
-        "summarize this page",
-        "can you see this",
-        "debug this",
-    ]
-    .iter()
-    .any(|phrase| normalized.contains(phrase))
-}
 
 #[cfg(test)]
 mod tests {
@@ -877,16 +1049,6 @@ mod tests {
     }
 
     #[test]
-    fn identifies_screen_aware_buddy_requests() {
-        assert!(command_needs_screen_context("Explain this screen for me."));
-        assert!(command_needs_screen_context("What am I looking at?"));
-        assert!(command_needs_screen_context("Can you summarize this page?"));
-        assert!(!command_needs_screen_context(
-            "Give me three names for a feature."
-        ));
-    }
-
-    #[test]
     fn transcript_formatting_removes_long_dashes_and_keeps_spoken_lists() {
         assert_eq!(
             sanitize_transcription_formatting("Build \u{2014} test \u{2013} ship"),
@@ -896,6 +1058,27 @@ mod tests {
             normalize_spoken_structure("first bullet point add tests"),
             "first \n-  add tests"
         );
+        assert_eq!(
+            normalize_spoken_structure("Read the bulletin. New Line done"),
+            "Read the bulletin. \n done"
+        );
+    }
+
+    #[test]
+    fn short_dictations_skip_the_ai_round_trip() {
+        assert!(!needs_ai_cleanup("Sounds good, ship it.", "balanced", 8));
+        assert!(!needs_ai_cleanup("git status", "code_literal", 8));
+        assert!(needs_ai_cleanup(
+            "Can you take another look at the release notes before lunch?",
+            "balanced",
+            8
+        ));
+        // Spoken code still needs the AI to become an identifier.
+        assert!(needs_ai_cleanup("snake case user id", "developer", 8));
+        assert!(needs_ai_cleanup("user dot name", "code_literal", 8));
+        assert!(!needs_ai_cleanup("just in case", "balanced", 8));
+        // 0 disables the shortcut entirely.
+        assert!(needs_ai_cleanup("ok", "balanced", 0));
     }
 
     #[test]
