@@ -236,7 +236,10 @@ fn handle_message(
             })?;
             match response.message_type.as_str() {
                 "Results" => {
-                    if let Some(channel) = response.channel {
+                    if let Some(channel) = response
+                        .channel
+                        .and_then(|channel| serde_json::from_value::<DeepgramChannel>(channel).ok())
+                    {
                         if let Some(alternative) = channel.alternatives.into_iter().next() {
                             let transcript = alternative.transcript.trim().to_string();
                             let is_final = response.is_final.unwrap_or(false);
@@ -342,7 +345,11 @@ impl Accumulator {
 struct DeepgramResponse {
     #[serde(rename = "type", default)]
     message_type: String,
-    channel: Option<DeepgramChannel>,
+    /// An object on `Results`, but a list of channel indexes on
+    /// `SpeechStarted` and `UtteranceEnd` (sent because of `vad_events` and
+    /// `utterance_end_ms`). Typing it as the object made those messages fail
+    /// to parse, which failed every dictation.
+    channel: Option<serde_json::Value>,
     is_final: Option<bool>,
     speech_final: Option<bool>,
     start: Option<f32>,
@@ -385,5 +392,25 @@ impl From<DeepgramWord> for WordTiming {
             end: value.end,
             confidence: value.confidence,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn voice_activity_messages_do_not_fail_the_session() {
+        let (sender, _receiver) = mpsc::unbounded_channel();
+        let mut accumulator = Accumulator::default();
+        for message in [
+            r#"{"type":"SpeechStarted","channel":[0],"timestamp":0.5}"#,
+            r#"{"type":"UtteranceEnd","channel":[0,1],"last_word_end":2.1}"#,
+            r#"{"type":"Results","is_final":true,"start":0.0,"duration":1.0,"channel":{"alternatives":[{"transcript":"hello there","confidence":0.9,"words":[]}]}}"#,
+        ] {
+            let done = handle_message(Message::Text(message.into()), &mut accumulator, &sender).unwrap();
+            assert!(!done);
+        }
+        assert_eq!(accumulator.final_segments, vec!["hello there"]);
     }
 }

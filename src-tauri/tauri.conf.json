@@ -79,7 +79,7 @@
       },
       {
         "label": "whiteboard",
-        "title": "Flow Whiteboard",
+        "title": "VoiceFlow Whiteboard",
         "url": "index.html#/whiteboard",
         "width": 1180,
         "height": 760,
@@ -97,6 +97,7 @@
     "active": true,
     "createUpdaterArtifacts": true,
     "targets": ["nsis", "msi"],
+    "resources": ["resources/kws/*"],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

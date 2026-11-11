@@ -318,7 +318,7 @@ export function AssistantPage() {
         />
         <SettingsRow
           label={'Wake up on "Hey Flow"'}
-          description="Start a conversation by saying it. Keeps the microphone open; listening for the phrase happens on this PC."
+          description="Start a conversation by saying it. Keeps the microphone open; listening happens on this PC. It uses the microphone chosen in Settings."
           action={<ToggleSwitch label="Wake up on Hey Flow" checked={settings.wakeWordEnabled} onChange={(value) => void update("wakeWordEnabled", value)} />}
         />
         <SettingsRow
