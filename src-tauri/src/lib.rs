@@ -241,6 +241,15 @@ pub fn run() {
             Ok(())
         })
         .on_window_event(|window, event| {
+            // The whiteboard hides instead of closing, so Flow can reopen it
+            // and nothing drawn is lost.
+            if window.label() == "whiteboard" {
+                if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                    api.prevent_close();
+                    let _ = window.hide();
+                }
+                return;
+            }
             if window.label() != "main" {
                 return;
             }
@@ -296,6 +305,7 @@ pub fn run() {
             commands::delete_dictionary_entry,
             commands::capture_screen_context,
             commands::show_history,
+            commands::show_whiteboard,
             commands::open_data_folder,
             commands::diagnostic_report,
             commands::clear_history,

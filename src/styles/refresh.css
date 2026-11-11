@@ -396,3 +396,6 @@ html:has(.agent-dock), html:has(.agent-dock) body, html:has(.agent-dock) #root {
 .page-tabs__tab:hover { color: var(--memora-text); background: var(--memora-subtle-hover); }
 .page-tabs__tab--active, .page-tabs__tab--active:hover { color: var(--memora-text); background: var(--vf-accent-soft); }
 .page-tabs__tab--active::after { position: absolute; left: 50%; bottom: -11px; width: 22px; height: 2px; content: ""; border-radius: 2px; background: var(--memora-accent-usable); transform: translateX(-50%); }
+
+/* --- Whiteboard: Excalidraw fills its own window --- */
+.whiteboard { position: fixed; inset: 0; }

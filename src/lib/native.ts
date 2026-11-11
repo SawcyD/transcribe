@@ -152,6 +152,7 @@ export const native = {
   pasteTranscript: (id: string) => call<void>("paste_transcript", { id }),
   pasteLatestTranscript: () => call<void>("paste_latest_transcript"),
   showHistory: () => call<void>("show_history"),
+  showWhiteboard: () => call<void>("show_whiteboard"),
   openDataFolder: (target: "logs" | "database") => call<void>("open_data_folder", { target }),
   diagnosticReport: () => call<string>("diagnostic_report"),
   clearHistory: () => call<number>("clear_history"),
@@ -220,6 +221,11 @@ export const events = {
     isTauri() ? listen<{ role: string; content: string }>("agent-transcript", ({ payload }) => handler(payload)) : Promise.resolve(() => undefined),
   agentLevel: (handler: (value: number) => void): Promise<UnlistenFn> =>
     isTauri() ? listen<number>("agent-level", ({ payload }) => handler(payload)) : Promise.resolve(() => undefined),
+  /** Flow asking the whiteboard to draw a Mermaid diagram, or to wipe itself. */
+  whiteboardDraw: (handler: (mermaid: string) => void): Promise<UnlistenFn> =>
+    isTauri() ? listen<string>("whiteboard-draw", ({ payload }) => handler(payload)) : Promise.resolve(() => undefined),
+  whiteboardClear: (handler: () => void): Promise<UnlistenFn> =>
+    isTauri() ? listen("whiteboard-clear", () => handler()) : Promise.resolve(() => undefined),
   assistantPlacement: (handler: (value: "above" | "below") => void): Promise<UnlistenFn> =>
     isTauri() ? listen<"above" | "below">("assistant-placement", ({ payload }) => handler(payload)) : Promise.resolve(() => undefined),
 };

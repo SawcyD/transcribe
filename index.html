@@ -8,7 +8,7 @@
     <script>
       // Floating windows (dock, bubble, agent) share this page but must
       // stay transparent and never show the splash.
-      if (/^#\/(overlay|assistant|agent)/.test(location.hash)) {
+      if (/^#\/(overlay|assistant|agent|whiteboard)/.test(location.hash)) {
         document.documentElement.classList.add("vf-floating");
       }
     </script>

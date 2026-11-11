@@ -18,7 +18,9 @@ use windows::{
 use crate::{app_state::AppState, voice_agent};
 
 /// What the agent answers to. Changing the name means changing these.
-const PHRASES: [&str; 3] = ["hey flow", "okay flow", "hi flow"];
+// Longer phrases are recognized more reliably than short ones, so the full
+// product name is accepted too.
+const PHRASES: [&str; 5] = ["hey flow", "okay flow", "hi flow", "hey voiceflow", "hey voice flow"];
 
 struct Listener {
     recognizer: SpeechRecognizer,
@@ -33,6 +35,9 @@ impl Listener {
             .Append(&SpeechRecognitionListConstraint::Create(&phrases)?)?;
         recognizer.CompileConstraintsAsync()?.join()?;
         let session = recognizer.ContinuousRecognitionSession()?;
+        // By default the session stops itself after a stretch of silence, and
+        // the first phrase after that is missed while it restarts.
+        session.SetAutoStopSilenceTimeout(Duration::from_secs(24 * 60 * 60).into())?;
         let app = app.clone();
         session.ResultGenerated(&TypedEventHandler::<
             SpeechContinuousRecognitionSession,

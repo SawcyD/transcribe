@@ -16,6 +16,8 @@
     "release:notes": "node scripts/release-notes.mjs"
   },
   "dependencies": {
+    "@excalidraw/excalidraw": "^0.18.1",
+    "@excalidraw/mermaid-to-excalidraw": "^3.6.0",
     "@memora/ui": "file:vendor/memora-ui-0.1.0.tgz",
     "@tauri-apps/api": "^2.11.1",
     "@tauri-apps/plugin-autostart": "^2.5.1",

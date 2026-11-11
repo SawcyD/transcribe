@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useCallback, useEffect, useRef, type ReactNode } from "react";
 import { ContentDialog as MemoraContentDialog } from "@memora/ui";
 
 interface ContentDialogProps {
@@ -25,6 +25,16 @@ export function ContentDialog({
   destructive = false,
   primaryDisabled = false,
 }: ContentDialogProps) {
+  // Memora moves focus to the dialog frame whenever `onCancel` changes
+  // identity. Callers pass inline functions, so every keystroke in a field
+  // re-rendered, changed it, and pulled focus out of the field. Hand Memora
+  // one function that never changes and always calls the latest `onClose`.
+  const latestClose = useRef(onClose);
+  useEffect(() => {
+    latestClose.current = onClose;
+  });
+  const close = useCallback(() => latestClose.current(), []);
+
   return (
     <MemoraContentDialog
       open={open}
@@ -32,7 +42,7 @@ export function ContentDialog({
       primaryText={primaryText}
       cancelText={closeText}
       destructive={destructive}
-      onCancel={onClose}
+      onCancel={close}
       onPrimary={primaryDisabled ? undefined : onPrimary}
     >
       {children}

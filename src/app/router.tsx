@@ -9,6 +9,7 @@ import { AppLayout } from "../components/layout/AppLayout";
 const RecordingOverlay = lazy(() => import("../overlay/RecordingOverlay").then((m) => ({ default: m.RecordingOverlay })));
 const AssistantDrawer = lazy(() => import("../assistant/AssistantDrawer").then((m) => ({ default: m.AssistantDrawer })));
 const AgentDock = lazy(() => import("../agent/AgentDock").then((m) => ({ default: m.AgentDock })));
+const Whiteboard = lazy(() => import("../whiteboard/Whiteboard").then((m) => ({ default: m.Whiteboard })));
 const HomePage = lazy(() => import("../pages/HomePage").then((m) => ({ default: m.HomePage })));
 const DictationPage = lazy(() => import("../pages/DictationPage").then((m) => ({ default: m.DictationPage })));
 const HistoryPage = lazy(() => import("../pages/HistoryPage").then((m) => ({ default: m.HistoryPage })));
@@ -26,6 +27,7 @@ export function AppRouter() {
           <Route path="/overlay" element={<RecordingOverlay />} />
           <Route path="/assistant" element={<AssistantDrawer />} />
           <Route path="/agent" element={<AgentDock />} />
+          <Route path="/whiteboard" element={<Whiteboard />} />
           <Route element={<AppLayout />}>
             <Route index element={<HomePage />} />
             <Route path="dictation" element={<DictationPage />} />

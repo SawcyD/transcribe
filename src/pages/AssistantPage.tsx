@@ -1,4 +1,4 @@
-import { AudioLines, History, MessageSquarePlus, Monitor, Send, Trash2, X } from "lucide-react";
+import { AudioLines, History, PenLine, MessageSquarePlus, Monitor, Send, Trash2, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "../components/common/Button";
 import { ContentDialog } from "../components/fluent/ContentDialog";
@@ -195,6 +195,9 @@ export function AssistantPage() {
         <span className="assistant-tabs__actions">
           <button type="button" className="text-button" onClick={newChat}>
             <MessageSquarePlus size={14} aria-hidden="true" /> New chat
+          </button>
+          <button type="button" className="text-button" onClick={() => void native.showWhiteboard()} title="A shared board you and Flow can both draw on">
+            <PenLine size={14} aria-hidden="true" /> Whiteboard
           </button>
           <Button variant="primary" icon={<AudioLines size={15} />} onClick={() => void native.startVoiceAgent()} title="Spoken back-and-forth conversation · Ctrl+Alt+V">
             Talk out loud

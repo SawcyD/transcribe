@@ -76,6 +76,17 @@
         "skipTaskbar": true,
         "focus": false,
         "visible": false
+      },
+      {
+        "label": "whiteboard",
+        "title": "Flow Whiteboard",
+        "url": "index.html#/whiteboard",
+        "width": 1180,
+        "height": 760,
+        "minWidth": 640,
+        "minHeight": 420,
+        "center": true,
+        "visible": false
       }
     ],
     "security": {

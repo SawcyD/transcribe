@@ -316,6 +316,50 @@ pub async fn capture_screen_context(app: AppHandle) -> Result<ScreenContext, App
     captured
 }
 
+/// Opens the shared whiteboard window (see `src/whiteboard/Whiteboard.tsx`).
+#[tauri::command]
+pub fn show_whiteboard(app: AppHandle) -> Result<(), AppError> {
+    let window = app
+        .get_webview_window("whiteboard")
+        .ok_or_else(|| AppError::Windows("whiteboard window is unavailable".into()))?;
+    let _ = window.unminimize();
+    let _ = window.show();
+    window
+        .set_focus()
+        .map_err(|error| AppError::Windows(error.to_string()))
+}
+
+/// Has the whiteboard draw a Mermaid diagram for the voice agent, and reports
+/// back whether it worked so the agent can correct invalid Mermaid.
+pub async fn draw_on_whiteboard(app: &AppHandle, mermaid: &str) -> String {
+    use tauri::Listener;
+    if mermaid.trim().is_empty() {
+        return "Nothing was drawn: the diagram was empty.".into();
+    }
+    if let Err(error) = show_whiteboard(app.clone()) {
+        return format!("Couldn't open the whiteboard: {error}");
+    }
+    let (sender, receiver) = tokio::sync::oneshot::channel::<String>();
+    let sender = std::sync::Mutex::new(Some(sender));
+    let listener = app.once("whiteboard-result", move |event| {
+        if let Some(sender) = sender.lock().ok().and_then(|mut slot| slot.take()) {
+            let _ = sender.send(event.payload().to_string());
+        }
+    });
+    let _ = app.emit("whiteboard-draw", mermaid);
+    match tokio::time::timeout(std::time::Duration::from_secs(6), receiver).await {
+        // The board answers with JSON: null when drawn, or the error text.
+        Ok(Ok(payload)) => match serde_json::from_str::<Option<String>>(&payload).ok().flatten() {
+            None => "Drawn on the whiteboard.".into(),
+            Some(error) => format!("That Mermaid could not be drawn ({error}). Fix it and try again."),
+        },
+        _ => {
+            app.unlisten(listener);
+            "Sent to the whiteboard.".into()
+        }
+    }
+}
+
 /// Brings the main window forward on the History page. Used by the overlay's
 /// "open transcript" affordance after a failed insertion.
 #[tauri::command]

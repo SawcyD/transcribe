@@ -377,9 +377,9 @@ async fn run(
                             "FunctionCallRequest" => {
                                 for call in event.functions.into_iter().filter(|call| call.client_side) {
                                     emit_state(app, "thinking", None);
-                                    let (settings, tool_done) = (settings.clone(), tool_done.clone());
+                                    let (app, settings, tool_done) = (app.clone(), settings.clone(), tool_done.clone());
                                     tauri::async_runtime::spawn(async move {
-                                        let content = run_tool(&settings, &call.name, &call.arguments).await;
+                                        let content = run_tool(&app, &settings, &call.name, &call.arguments).await;
                                         let _ = tool_done.send((call.id, call.name, content));
                                     });
                                 }
@@ -429,7 +429,7 @@ async fn run(
 
 /// Runs one tool for the agent. Failures go back as text so it can tell the
 /// user what went wrong instead of going silent.
-async fn run_tool(settings: &crate::models::AppSettings, name: &str, arguments: &str) -> String {
+async fn run_tool(app: &AppHandle, settings: &crate::models::AppSettings, name: &str, arguments: &str) -> String {
     let arguments: serde_json::Value = serde_json::from_str(arguments).unwrap_or_default();
     let argument = |key: &str| arguments[key].as_str().unwrap_or_default().to_owned();
     match name {
@@ -442,6 +442,12 @@ async fn run_tool(settings: &crate::models::AppSettings, name: &str, arguments: 
         }
         "open_app" if settings.voice_agent_can_act => crate::launcher::open_app(&argument("name")),
         "open_website" if settings.voice_agent_can_act => crate::launcher::open_url(&argument("url")),
+        "draw_on_whiteboard" => crate::commands::draw_on_whiteboard(app, &argument("mermaid")).await,
+        "clear_whiteboard" => {
+            let _ = crate::commands::show_whiteboard(app.clone());
+            let _ = app.emit("whiteboard-clear", ());
+            "Cleared the whiteboard.".into()
+        }
         _ => "That tool is not available.".into(),
     }
 }
@@ -460,6 +466,7 @@ If the user asks for a mock interview, interview prep or interview mode, become 
     if can_act {
         prompt.push_str("\n\nYou can open apps on the user's computer with open_app and web pages with open_website. Use them when asked, then confirm in a few words. You cannot do anything else on the computer, so say so if asked.");
     }
+    prompt.push_str("\n\nYou share a whiteboard with the user. When they are planning or brainstorming, or ask for a diagram, flowchart or notes, draw it with draw_on_whiteboard, then say in one sentence what you drew. Write Mermaid flowchart code with short labels and plain words: no quotes, brackets or special characters inside a label. If you are told the Mermaid could not be drawn, simplify it and try once more. If you can look at the screen, use that to see what the user drew.");
     if let Some(memory) = memory {
         prompt.push_str("\n\n");
         prompt.push_str(memory);
@@ -499,9 +506,13 @@ If the user asks for a mock interview, interview prep or interview mode, become 
         tools.push(tool("open_app", "Open an app installed on the user's computer.", "name", "The app's full official name, for example \"Visual Studio Code\" or \"OBS Studio\""));
         tools.push(tool("open_website", "Open a web page in the user's browser.", "url", "The full address, starting with https://"));
     }
-    if !tools.is_empty() {
-        settings["agent"]["think"]["functions"] = tools.into();
-    }
+    tools.push(tool("draw_on_whiteboard", "Draw a diagram on the whiteboard you share with the user. It is added next to what is already there.", "mermaid", "Mermaid flowchart code, for example: flowchart TD\n  A[Idea] --> B{Worth it}\n  B -->|Yes| C[Build it]"));
+    tools.push(serde_json::json!({
+        "name": "clear_whiteboard",
+        "description": "Erase everything on the whiteboard. Only when the user asks.",
+        "parameters": { "type": "object", "properties": {} }
+    }));
+    settings["agent"]["think"]["functions"] = tools.into();
     settings
 }
 
@@ -597,8 +608,10 @@ mod tests {
         assert_eq!(settings["agent"]["think"]["functions"][0]["name"], "look_at_screen");
         assert_eq!(settings["agent"]["think"]["functions"][1]["name"], "open_app");
         assert_eq!(settings["agent"]["think"]["functions"][1]["parameters"]["required"][0], "name");
-        // With everything off, the agent is offered no tools.
-        assert!(agent_settings("flux-kit-en", 0, None, false, false)["agent"]["think"]["functions"].is_null());
+        // With screen and actions off, only the whiteboard tools are offered.
+        let functions = &agent_settings("flux-kit-en", 0, None, false, false)["agent"]["think"]["functions"];
+        assert_eq!(functions.as_array().map(Vec::len), Some(2));
+        assert_eq!(functions[0]["name"], "draw_on_whiteboard");
         // Anything that isn't a Flux voice falls back to the default.
         assert_eq!(agent_settings("Microsoft Zira", 0, None, false, false)["agent"]["speak"]["provider"]["model"], "flux-kit-en");
     }
