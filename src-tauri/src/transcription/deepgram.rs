@@ -69,6 +69,9 @@ pub(crate) fn listen_url(config: &TranscriptionConfig) -> url::Url {
             .append_pair("endpointing", &config.endpointing_ms.to_string())
             .append_pair("utterance_end_ms", "1200")
             .append_pair("vad_events", "true");
+        if config.numerals {
+            query.append_pair("numerals", "true");
+        }
         for keyterm in config.dictionary_keyterms.iter().take(100) {
             // Nova-3 keyterm takes raw term/phrase without :weight intensifiers
             query.append_pair("keyterm", keyterm.trim());

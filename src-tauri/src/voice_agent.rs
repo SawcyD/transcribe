@@ -23,12 +23,82 @@ use crate::{
     security::{self, CredentialKind},
 };
 
+/// Deepgram's own default Flux voice.
+pub const DEFAULT_VOICE: &str = "flux-kit-en";
 const AGENT_URL: &str = "wss://agent.deepgram.com/v1/agent/converse";
 const INPUT_RATE: u32 = 16_000;
 const OUTPUT_RATE: u32 = 24_000;
 /// After the agent's last audio, keep the mic muted briefly so the tail of
 /// its voice (still in the speaker/room) isn't heard as the user.
 const ECHO_TAIL: Duration = Duration::from_millis(450);
+/// A sound must last this long before the agent hears it. Claps, snaps and key
+/// clacks are over sooner; the start of a word is held back, not lost.
+const GATE_OPEN_SAMPLES: usize = INPUT_RATE as usize * 150 / 1000;
+/// Once open, the gate stays open through pauses this long.
+const GATE_CLOSE_SAMPLES: usize = INPUT_RATE as usize * 400 / 1000;
+/// How far above the noise floor counts as a sound.
+const GATE_MARGIN_DB: f32 = 10.0;
+
+/// Passes the mic through only for sustained sound, so a clap or snap doesn't
+/// register as the user speaking (and cut the agent off).
+// ponytail: duration-only gate; a long non-speech noise (a cough, music) still
+// gets through. Swap in a real speech detector (e.g. Silero VAD) if it matters.
+pub(crate) struct SpeechGate {
+    threshold: f32,
+    held: Vec<Vec<u8>>,
+    loud: usize,
+    quiet: usize,
+    open: bool,
+}
+
+impl SpeechGate {
+    pub(crate) fn new(noise_floor_db: f32) -> Self {
+        Self {
+            threshold: 10f32.powf((noise_floor_db + GATE_MARGIN_DB) / 20.0),
+            held: Vec::new(),
+            loud: 0,
+            quiet: 0,
+            open: false,
+        }
+    }
+
+    /// Takes one PCM16 chunk and returns the chunks to send now, in order.
+    pub(crate) fn push(&mut self, chunk: Vec<u8>) -> Vec<Vec<u8>> {
+        let samples: Vec<i16> = chunk
+            .chunks_exact(2)
+            .map(|pair| i16::from_le_bytes([pair[0], pair[1]]))
+            .collect();
+        let is_loud = crate::audio::audio_level::rms(&samples) > self.threshold;
+        if self.open {
+            if is_loud {
+                self.quiet = 0;
+            } else {
+                self.quiet += samples.len();
+                if self.quiet >= GATE_CLOSE_SAMPLES {
+                    self.open = false;
+                    self.loud = 0;
+                }
+            }
+            return vec![chunk];
+        }
+        if is_loud {
+            self.loud += samples.len();
+            self.held.push(chunk);
+            if self.loud < GATE_OPEN_SAMPLES {
+                return Vec::new();
+            }
+            self.open = true;
+            self.quiet = 0;
+            return std::mem::take(&mut self.held);
+        }
+        // It went quiet before lasting long enough: what was held was a
+        // transient. Send silence of the same length to keep the timeline.
+        self.loud = 0;
+        let mut out: Vec<Vec<u8>> = self.held.drain(..).map(|held| vec![0u8; held.len()]).collect();
+        out.push(chunk);
+        out
+    }
+}
 
 pub struct AgentHandle {
     stop: Option<oneshot::Sender<()>>,
@@ -124,7 +194,7 @@ pub async fn start(app: &AppHandle, state: &AppState) -> Result<(), AppError> {
     } else {
         None
     };
-    let settings_message = agent_settings(settings.assistant_voice.as_deref(), memory.as_deref());
+    let settings_message = agent_settings(&settings.voice_agent_voice, settings.voice_agent_expressivity, memory.as_deref());
 
     let mut request = AGENT_URL
         .into_client_request()
@@ -188,6 +258,7 @@ pub async fn start(app: &AppHandle, state: &AppState) -> Result<(), AppError> {
 
     let app = app.clone();
     let interruptible = settings.voice_agent_interruptible;
+    let gate = SpeechGate::new(settings.noise_floor_db);
     let remember = settings.assistant_remember_chats;
     // The capture and player live in this task and stop when it ends.
     tauri::async_runtime::spawn(async move {
@@ -199,6 +270,7 @@ pub async fn start(app: &AppHandle, state: &AppState) -> Result<(), AppError> {
             stop_receiver,
             interruptible,
             remember,
+            gate,
         )
         .await;
         drop(capture.stop());
@@ -227,12 +299,13 @@ async fn run(
     mut stop: oneshot::Receiver<()>,
     interruptible: bool,
     remember: bool,
+    mut gate: SpeechGate,
 ) -> Result<(), AppError> {
     let state = app.state::<AppState>();
     let chat_id = format!("voice-{}", uuid::Uuid::new_v4());
     let mut pending_question: Option<String> = None;
     let mut last_agent_audio: Option<Instant> = None;
-    let mut level_tick = tokio::time::interval(Duration::from_millis(50));
+    let mut level_tick = tokio::time::interval(Duration::from_millis(33));
     loop {
         tokio::select! {
             _ = &mut stop => {
@@ -243,11 +316,13 @@ async fn run(
                 let Some(chunk) = chunk else { return Ok(()) };
                 let agent_talking = player.is_playing()
                     || last_agent_audio.is_some_and(|at| at.elapsed() < ECHO_TAIL);
-                let payload = if agent_talking && !interruptible { vec![0u8; chunk.len()] } else { chunk };
-                socket
-                    .send(Message::Binary(payload.into()))
-                    .await
-                    .map_err(|error| AppError::Transcription(error.to_string()))?;
+                for chunk in gate.push(chunk) {
+                    let payload = if agent_talking && !interruptible { vec![0u8; chunk.len()] } else { chunk };
+                    socket
+                        .send(Message::Binary(payload.into()))
+                        .await
+                        .map_err(|error| AppError::Transcription(error.to_string()))?;
+                }
             }
             _ = level_tick.tick() => {
                 let _ = app.emit("agent-level", player.level());
@@ -313,10 +388,12 @@ async fn run(
 }
 
 /// The Settings message that configures the conversation.
-pub(crate) fn agent_settings(voice: Option<&str>, memory: Option<&str>) -> serde_json::Value {
-    let voice = voice.filter(|value| value.starts_with("aura-")).unwrap_or(crate::tts::DEFAULT_VOICE);
+pub(crate) fn agent_settings(voice: &str, expressivity: i32, memory: Option<&str>) -> serde_json::Value {
+    let voice = if voice.starts_with("flux-") { voice } else { DEFAULT_VOICE };
     let mut prompt = String::from(
-        "You are VoiceFlow's voice assistant, talking with the user out loud. Keep replies short and conversational: one to three sentences, no lists, no Markdown, no code blocks, nothing that only makes sense when read. Ask a short follow-up question when it helps. If you don't know something, say so.",
+        "You are VoiceFlow's voice assistant, talking with the user out loud. Keep replies short and conversational: one to three sentences, no lists, no Markdown, no code blocks, nothing that only makes sense when read. Ask a short follow-up question when it helps. If you don't know something, say so.
+
+If the user asks for a mock interview, interview prep or interview mode, become the interviewer. First ask what role and company it's for and which kind they want (behavioral, technical, or both) unless they already said. With no preference, start with behavioral questions. Ask exactly one question at a time and wait for the full answer. Follow up on vague answers the way a real interviewer would. For technical questions, state the problem clearly, let them think out loud, and give a small hint only if they are stuck or ask. Don't give feedback after each answer unless they ask. Stay in the interviewer role until they say they're done, then give brief, honest feedback: what was strong, what to improve, and one concrete thing to practice.",
     );
     if let Some(memory) = memory {
         prompt.push_str("\n\n");
@@ -332,10 +409,11 @@ pub(crate) fn agent_settings(voice: Option<&str>, memory: Option<&str>) -> serde
             "language": "en",
             "listen": { "provider": { "type": "deepgram", "model": "nova-3" } },
             "think": {
-                "provider": { "type": "open_ai", "model": "gpt-4o-mini", "temperature": 0.7 },
+                "provider": { "type": "open_ai", "model": "gpt-5.6-luna" },
                 "prompt": prompt
             },
-            "speak": { "provider": { "type": "deepgram", "model": voice } },
+            // Flux voices need version v2 and raw linear16 output (set above).
+            "speak": { "provider": { "type": "deepgram", "version": "v2", "model": voice, "expressivity": expressivity.clamp(-2, 2) } },
             "greeting": "Hey! What's on your mind?"
         }
     })
@@ -385,18 +463,49 @@ fn hide_dock(app: &AppHandle) {
 
 #[cfg(test)]
 mod tests {
-    use super::agent_settings;
+    use super::{agent_settings, SpeechGate, GATE_OPEN_SAMPLES};
+
+    fn chunk(value: i16) -> Vec<u8> {
+        // 10 ms at 16 kHz.
+        std::iter::repeat(value.to_le_bytes()).take(160).flatten().collect()
+    }
+
+    #[test]
+    fn gate_silences_a_clap_but_keeps_all_of_sustained_speech() {
+        let mut gate = SpeechGate::new(-52.0);
+        // A 50 ms burst, then quiet: everything that comes out is silence.
+        let mut out = Vec::new();
+        for _ in 0..5 {
+            out.extend(gate.push(chunk(20_000)));
+        }
+        assert!(out.is_empty(), "a burst is held until it proves sustained");
+        out.extend(gate.push(chunk(0)));
+        assert_eq!(out.len(), 6);
+        assert!(out.iter().flatten().all(|byte| *byte == 0));
+
+        // Sustained sound: released from its very first chunk once it has lasted.
+        let needed = GATE_OPEN_SAMPLES / 160;
+        let mut out = Vec::new();
+        for _ in 0..needed + 3 {
+            out.extend(gate.push(chunk(8_000)));
+        }
+        assert_eq!(out.len(), needed + 3);
+        assert!(out.iter().all(|sent| *sent == chunk(8_000)));
+        // A short pause mid-sentence passes straight through.
+        assert_eq!(gate.push(chunk(0)).len(), 1);
+    }
 
     #[test]
     fn settings_message_matches_the_agent_api_shape() {
-        let settings = agent_settings(Some("aura-2-helena-en"), Some("Recent: interview prep"));
+        let settings = agent_settings("flux-cliff-en", 5, Some("Recent: interview prep"));
         assert_eq!(settings["type"], "Settings");
         assert_eq!(settings["audio"]["input"]["sample_rate"], 16_000);
         assert_eq!(settings["audio"]["output"]["encoding"], "linear16");
         assert_eq!(settings["agent"]["listen"]["provider"]["model"], "nova-3");
-        assert_eq!(settings["agent"]["speak"]["provider"]["model"], "aura-2-helena-en");
+        assert_eq!(settings["agent"]["speak"]["provider"]["model"], "flux-cliff-en");
+        assert_eq!(settings["agent"]["speak"]["provider"]["expressivity"], 2);
         assert!(settings["agent"]["think"]["prompt"].as_str().unwrap().contains("interview prep"));
-        // Non-Deepgram voices fall back to the default.
-        assert_eq!(agent_settings(Some("Microsoft Zira"), None)["agent"]["speak"]["provider"]["model"], "aura-2-thalia-en");
+        // Anything that isn't a Flux voice falls back to the default.
+        assert_eq!(agent_settings("Microsoft Zira", 0, None)["agent"]["speak"]["provider"]["model"], "flux-kit-en");
     }
 }

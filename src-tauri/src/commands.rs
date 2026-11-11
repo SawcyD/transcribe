@@ -316,38 +316,6 @@ pub async fn capture_screen_context(app: AppHandle) -> Result<ScreenContext, App
     captured
 }
 
-#[tauri::command]
-pub fn hide_buddy(app: AppHandle) -> Result<(), AppError> {
-    app.get_webview_window("buddy")
-        .ok_or_else(|| AppError::Windows("buddy window is unavailable".into()))?
-        .hide()
-        .map_err(|error| AppError::Windows(error.to_string()))
-}
-
-/// Applies the Buddy visibility, size, and always-on-top settings to its window.
-#[tauri::command]
-pub async fn apply_buddy_settings(app: AppHandle, state: State<'_, AppState>) -> Result<(), AppError> {
-    let settings = state.settings.read().await.clone();
-    let window = app
-        .get_webview_window("buddy")
-        .ok_or_else(|| AppError::Windows("buddy window is unavailable".into()))?;
-    if !settings.buddy_enabled {
-        return window
-            .hide()
-            .map_err(|error| AppError::Windows(error.to_string()));
-    }
-    let side = match settings.buddy_size.as_str() {
-        "small" => 104u32,
-        "large" => 192,
-        _ => 144,
-    };
-    let _ = window.set_size(tauri::Size::Physical(tauri::PhysicalSize::new(side, side)));
-    let _ = window.set_always_on_top(settings.buddy_always_on_top);
-    window
-        .show()
-        .map_err(|error| AppError::Windows(error.to_string()))
-}
-
 /// Brings the main window forward on the History page. Used by the overlay's
 /// "open transcript" affordance after a failed insertion.
 #[tauri::command]
@@ -358,19 +326,6 @@ pub fn show_history(app: AppHandle) -> Result<(), AppError> {
     let _ = window.show();
     let _ = window.set_focus();
     app.emit("navigate", "/history")
-        .map_err(|error| AppError::Windows(error.to_string()))
-}
-
-/// Brings the main window forward on the Assistant page, where Buddy's own
-/// settings live. Invoked from Buddy's context menu.
-#[tauri::command]
-pub fn show_buddy_settings(app: AppHandle) -> Result<(), AppError> {
-    let window = app
-        .get_webview_window("main")
-        .ok_or_else(|| AppError::Windows("main window is unavailable".into()))?;
-    let _ = window.show();
-    let _ = window.set_focus();
-    app.emit("navigate", "/assistant-settings")
         .map_err(|error| AppError::Windows(error.to_string()))
 }
 

@@ -636,6 +636,7 @@ fn transcription_config(
         interim_results: true,
         punctuation: true,
         smart_formatting: true,
+        numerals: settings.numerals,
         dictionary_keyterms: keyterms,
         // A code-oriented cleanup style is the signal that this app wants the
         // developer transcription profile too.

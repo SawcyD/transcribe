@@ -2,12 +2,11 @@ import { lazy, Suspense } from "react";
 import { HashRouter, Navigate, Route, Routes } from "react-router-dom";
 import { AppLayout } from "../components/layout/AppLayout";
 
-// Every window (main, dock, Buddy, bubble, agent dock) loads this same app.
+// Every window (main, dock, bubble, agent dock) loads this same app.
 // Loading each screen on demand means the small floating windows don't parse
 // every page at startup, and the main window shows Home without waiting for
 // Settings, History, etc.
 const RecordingOverlay = lazy(() => import("../overlay/RecordingOverlay").then((m) => ({ default: m.RecordingOverlay })));
-const BuddyOverlay = lazy(() => import("../buddy/BuddyOverlay").then((m) => ({ default: m.BuddyOverlay })));
 const AssistantDrawer = lazy(() => import("../assistant/AssistantDrawer").then((m) => ({ default: m.AssistantDrawer })));
 const AgentDock = lazy(() => import("../agent/AgentDock").then((m) => ({ default: m.AgentDock })));
 const HomePage = lazy(() => import("../pages/HomePage").then((m) => ({ default: m.HomePage })));
@@ -25,7 +24,6 @@ export function AppRouter() {
       <Suspense fallback={null}>
         <Routes>
           <Route path="/overlay" element={<RecordingOverlay />} />
-          <Route path="/buddy" element={<BuddyOverlay />} />
           <Route path="/assistant" element={<AssistantDrawer />} />
           <Route path="/agent" element={<AgentDock />} />
           <Route element={<AppLayout />}>

@@ -225,7 +225,6 @@ pub struct AppSettings {
     pub call_mode_application: String,
     pub call_mode_output_device_name: Option<String>,
     pub theme: String,
-    pub buddy_stroll_enabled: bool,
     pub buddy_speak_responses: bool,
     pub assistant_endpoint: String,
     pub assistant_model: String,
@@ -247,12 +246,14 @@ pub struct AppSettings {
     pub overlay_position: String,
     /// Overlay opacity as a percentage, 40–100.
     pub overlay_opacity: u32,
-    pub buddy_enabled: bool,
-    pub buddy_show_at_startup: bool,
-    pub buddy_size: String,
-    pub buddy_always_on_top: bool,
     pub assistant_allow_screen_context: bool,
     pub assistant_voice: Option<String>,
+    /// Flux voice the live voice agent speaks with (a Deepgram model id).
+    pub voice_agent_voice: String,
+    /// How animated the voice agent sounds: -2 (calmer) to 2 (more animated).
+    pub voice_agent_expressivity: i32,
+    /// Write spoken numbers as digits ("nine hundred" becomes "900").
+    pub numerals: bool,
     pub store_raw_transcript: bool,
     pub store_normalized_transcript: bool,
     pub store_cleaned_transcript: bool,
@@ -298,7 +299,6 @@ impl Default for AppSettings {
             call_mode_application: "Discord".into(),
             call_mode_output_device_name: None,
             theme: "system".into(),
-            buddy_stroll_enabled: false,
             buddy_speak_responses: false,
             assistant_endpoint: "https://api.openai.com/v1".into(),
             assistant_model: "gpt-4.1-mini".into(),
@@ -316,12 +316,11 @@ impl Default for AppSettings {
             play_tones: true,
             overlay_position: "bottom_center".into(),
             overlay_opacity: 90,
-            buddy_enabled: true,
-            buddy_show_at_startup: true,
-            buddy_size: "medium".into(),
-            buddy_always_on_top: true,
             assistant_allow_screen_context: true,
             assistant_voice: None,
+            voice_agent_voice: crate::voice_agent::DEFAULT_VOICE.into(),
+            voice_agent_expressivity: 1,
+            numerals: false,
             store_raw_transcript: true,
             store_normalized_transcript: true,
             store_cleaned_transcript: true,
@@ -418,9 +417,6 @@ impl AppSettings {
         ) {
             return Err("overlay position is not a supported anchor".into());
         }
-        if !matches!(self.buddy_size.as_str(), "small" | "medium" | "large") {
-            return Err("buddy size must be small, medium, or large".into());
-        }
         if !matches!(self.theme.as_str(), "system" | "light" | "dark") {
             return Err("theme must be system, light, or dark".into());
         }
@@ -492,6 +488,7 @@ pub struct TranscriptionConfig {
     pub interim_results: bool,
     pub punctuation: bool,
     pub smart_formatting: bool,
+    pub numerals: bool,
     pub dictionary_keyterms: Vec<String>,
     pub developer_mode: bool,
     pub endpointing_ms: u32,
@@ -542,7 +539,6 @@ mod tests {
         .unwrap();
         assert_eq!(settings.cleanup_style, "balanced");
         assert!(settings.auto_apply_transform.is_none());
-        assert!(!settings.buddy_stroll_enabled);
         assert!(!settings.buddy_speak_responses);
         assert_eq!(settings.assistant_model, "gpt-4.1-mini");
         assert_eq!(settings.theme, "system");

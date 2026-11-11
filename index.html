@@ -6,9 +6,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>VoiceFlow Dev</title>
     <script>
-      // Floating windows (dock, Buddy, bubble, agent) share this page but must
+      // Floating windows (dock, bubble, agent) share this page but must
       // stay transparent and never show the splash.
-      if (/^#\/(overlay|buddy|assistant|agent)/.test(location.hash)) {
+      if (/^#\/(overlay|assistant|agent)/.test(location.hash)) {
         document.documentElement.classList.add("vf-floating");
       }
     </script>

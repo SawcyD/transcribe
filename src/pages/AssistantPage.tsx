@@ -7,7 +7,7 @@ import { SettingsRow, SettingsSection } from "../components/fluent/SettingsRow";
 import { ToggleSwitch } from "../components/fluent/ToggleSwitch";
 import { MiniMarkdown } from "../lib/miniMarkdown";
 import { defaultSettings, events, native } from "../lib/native";
-import { ASSISTANT_VOICES, speak } from "../lib/speech";
+import { ASSISTANT_VOICES, VOICE_AGENT_VOICES, speak } from "../lib/speech";
 import type { AppSettings, AssistantChatSummary, AssistantConversationTurn, CredentialStatus, ScreenContext } from "../types/models";
 
 type Tab = "chat" | "saved";
@@ -314,6 +314,32 @@ export function AssistantPage() {
           action={<ToggleSwitch label="Let me interrupt the voice agent" checked={settings.voiceAgentInterruptible} onChange={(value) => void update("voiceAgentInterruptible", value)} />}
         />
         <SettingsRow
+          label="Voice agent voice"
+          description="Who you hear in a live conversation. Takes effect on the next conversation."
+          action={
+            <select className="settings-combo" aria-label="Voice agent voice" value={settings.voiceAgentVoice} onChange={(event) => void update("voiceAgentVoice", event.target.value)}>
+              {VOICE_AGENT_VOICES.map((voice) => (
+                <option key={voice.id} value={voice.id}>
+                  {voice.label}
+                </option>
+              ))}
+            </select>
+          }
+        />
+        <SettingsRow
+          label="Expressivity"
+          description="How animated the voice agent sounds."
+          action={
+            <select className="settings-combo" aria-label="Expressivity" value={settings.voiceAgentExpressivity} onChange={(event) => void update("voiceAgentExpressivity", Number(event.target.value))}>
+              <option value={2}>2 (more animated)</option>
+              <option value={1}>1</option>
+              <option value={0}>0 (default)</option>
+              <option value={-1}>-1</option>
+              <option value={-2}>-2 (calmer)</option>
+            </select>
+          }
+        />
+        <SettingsRow
           label="Read answers aloud"
           action={<ToggleSwitch label="Read answers aloud" checked={settings.buddySpeakResponses} onChange={(value) => void update("buddySpeakResponses", value)} />}
         />
@@ -365,64 +391,6 @@ export function AssistantPage() {
                 </Button>
               )}
             </span>
-          }
-        />
-      </SettingsSection>
-
-      <SettingsSection title="Buddy">
-        <SettingsRow
-          label="Enable Buddy"
-          description="The desktop companion that mirrors dictation state and opens the assistant."
-          action={
-            <ToggleSwitch
-              label="Enable Buddy"
-              checked={settings.buddyEnabled}
-              onChange={async (value) => {
-                await update("buddyEnabled", value);
-                await native.applyBuddySettings();
-              }}
-            />
-          }
-        />
-        <SettingsRow
-          label="Show Buddy when VoiceFlow starts"
-          action={
-            <ToggleSwitch
-              label="Show Buddy when VoiceFlow starts"
-              checked={settings.buddyShowAtStartup}
-              onChange={(value) => void update("buddyShowAtStartup", value)}
-            />
-          }
-        />
-        <SettingsRow
-          label="Buddy size"
-          action={
-            <select
-              className="settings-combo"
-              aria-label="Buddy size"
-              value={settings.buddySize}
-              onChange={async (event) => {
-                await update("buddySize", event.target.value as AppSettings["buddySize"]);
-                await native.applyBuddySettings();
-              }}
-            >
-              <option value="small">Small</option>
-              <option value="medium">Medium</option>
-              <option value="large">Large</option>
-            </select>
-          }
-        />
-        <SettingsRow
-          label="Keep above other windows"
-          action={
-            <ToggleSwitch
-              label="Keep above other windows"
-              checked={settings.buddyAlwaysOnTop}
-              onChange={async (value) => {
-                await update("buddyAlwaysOnTop", value);
-                await native.applyBuddySettings();
-              }}
-            />
           }
         />
       </SettingsSection>

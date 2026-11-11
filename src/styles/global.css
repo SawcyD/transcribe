@@ -336,11 +336,6 @@ kbd { display: inline-flex; align-items: center; justify-content: center; min-wi
 .composer__actions { display: flex; align-items: center; gap: 8px; }
 .composer__hint { margin-left: auto; color: var(--muted); font-size: 11px; }
 
-/* --- Buddy context menu (WinUI MenuFlyout) --- */
-.buddy-menu__scrim { position: fixed; inset: 0; z-index: 4; }
-.buddy-menu { position: absolute; z-index: 5; top: 8px; left: 6px; display: grid; gap: 1px; width: 132px; margin: 0; padding: 4px; list-style: none; border: 1px solid var(--divider); border-radius: var(--corner-control); background: color-mix(in srgb, var(--surface-raised) 92%, transparent); box-shadow: 0 8px 20px rgba(0, 0, 0, .3); backdrop-filter: blur(24px); -webkit-backdrop-filter: blur(24px); }
-.buddy-menu button { display: block; width: 100%; min-height: 28px; padding: 0 8px; color: var(--ink); text-align: left; background: transparent; border: 0; border-radius: var(--corner-small); cursor: pointer; font-size: 12px; }
-.buddy-menu button:hover { background: var(--control-hover); }
 
 /* --- Dialog form --- */
 .dialog-form { display: grid; gap: 12px; }
@@ -411,46 +406,6 @@ kbd { display: inline-flex; align-items: center; justify-content: center; min-wi
 .audio-wave--static i { display: block; height: 100%; border-radius: 2px; background: var(--accent); }
 @keyframes spin { to { transform: rotate(360deg); } }
 
-.buddy-pet { position: relative; display: grid; place-items: center; width: 144px; height: 144px; margin: 0; background: transparent; cursor: grab; touch-action: none; user-select: none; }
-.buddy-pet:active { cursor: grabbing; }
-.buddy-sprite { display: block; width: 128px; height: 128px; background-image: url('/voiceflow-buddy-sheet.png'); background-repeat: no-repeat; background-size: 400% 300%; filter: drop-shadow(0 7px 10px rgba(0,0,0,.3)); image-rendering: pixelated; transition-property: filter, opacity, transform; transition-duration: 180ms; transition-timing-function: cubic-bezier(.2,0,0,1); will-change: transform; }
-.buddy-pet--push_to_talk .buddy-sprite { animation: buddy-listening 480ms ease-in-out infinite alternate; filter: drop-shadow(0 7px 12px rgba(81,220,181,.26)); }
-.buddy-pet--hands_free .buddy-sprite { animation: buddy-hands-free 900ms ease-in-out infinite alternate; filter: drop-shadow(0 7px 12px rgba(118,170,250,.28)); }
-.buddy-pet--call_recording .buddy-sprite { animation: buddy-listening 520ms ease-in-out infinite alternate; filter: drop-shadow(0 7px 13px rgba(255,94,117,.28)); }
-.buddy-pet--capturing .buddy-sprite { animation: buddy-capturing 620ms ease-in-out infinite alternate; filter: drop-shadow(0 7px 13px rgba(118,170,250,.3)); }
-.buddy-pet--thinking .buddy-sprite, .buddy-pet--analyzing .buddy-sprite { animation: buddy-thinking 950ms ease-in-out infinite alternate; filter: drop-shadow(0 7px 13px rgba(118,170,250,.24)); }
-.buddy-pet--success .buddy-sprite { animation: buddy-success 540ms ease-out infinite alternate; filter: drop-shadow(0 7px 13px rgba(141,241,189,.3)); }
-.buddy-pet--warning .buddy-sprite { filter: drop-shadow(0 7px 12px rgba(255,175,112,.26)); }
-.buddy-pet--walking .buddy-sprite { animation: buddy-walk-bob 240ms ease-in-out infinite alternate; filter: drop-shadow(0 7px 13px rgba(118,170,250,.28)); }
-.buddy-pet--walking.buddy-pet--walk-left .buddy-sprite { animation-name: buddy-walk-bob-left; }
-@keyframes buddy-listening { to { transform: translateY(-3px) scale(1.025); } }
-@keyframes buddy-hands-free { to { transform: translateY(-2px) rotate(1deg); } }
-@keyframes buddy-capturing { to { transform: scale(1.045); } }
-@keyframes buddy-thinking { to { transform: translateY(-2px) rotate(-1deg); } }
-@keyframes buddy-success { to { transform: translateY(-5px) scale(1.04); } }
-@keyframes buddy-walk-bob { from { transform: translateY(0); } to { transform: translateY(-2px); } }
-@keyframes buddy-walk-bob-left { from { transform: scaleX(-1); } to { transform: scaleX(-1) translateY(-2px); } }
-.buddy-face-wave { position: absolute; top: 35px; left: 36px; z-index: 2; display: flex; align-items: center; justify-content: center; width: 57px; height: 20px; gap: 2px; pointer-events: none; }
-.buddy-face-wave i { display: block; flex: 0 0 2px; width: 2px; border-radius: 999px; background: #72f4e8; box-shadow: 0 0 5px rgba(114,244,232,.72); transition-property: height, opacity; transition-duration: 90ms; transition-timing-function: cubic-bezier(.2,0,0,1); }
-.buddy-face-wave--hands_free i { background: #9df2c5; box-shadow: 0 0 5px rgba(157,242,197,.62); opacity: .82; }
-.buddy-face-wave--call_recording i { background: #8df5d2; box-shadow: 0 0 5px rgba(141,245,210,.72); }
-.buddy-recording-dot { position: absolute; top: 25px; right: 19px; z-index: 3; width: 8px; height: 8px; border: 2px solid rgba(12,18,23,.86); border-radius: 999px; background: #ff5e75; box-shadow: 0 0 0 3px rgba(255,94,117,.15), 0 0 9px rgba(255,94,117,.72); animation: buddy-recording-pulse 900ms ease-in-out infinite; pointer-events: none; }
-@keyframes buddy-recording-pulse { 50% { opacity: .38; transform: scale(.78); } }
-.buddy-snooze { position: absolute; z-index: 3; top: 14px; right: 11px; width: 38px; height: 48px; color: #72f4e8; font-family: "Cascadia Mono", Consolas, monospace; font-size: 13px; font-weight: 750; pointer-events: none; }
-.buddy-snooze i { position: absolute; opacity: 0; font-style: normal; animation: buddy-snooze-z 2.4s ease-out infinite; }
-.buddy-snooze i:nth-child(1) { right: 20px; bottom: 0; animation-delay: 0ms; }
-.buddy-snooze i:nth-child(2) { right: 10px; bottom: 12px; animation-delay: 800ms; }
-.buddy-snooze i:nth-child(3) { right: 0; bottom: 25px; animation-delay: 1.6s; }
-@keyframes buddy-snooze-z { 15% { opacity: .95; } to { opacity: 0; transform: translate(8px,-16px) scale(1.16); } }
-.buddy-scan-overlay { position: absolute; z-index: 3; top: 36px; left: 29px; width: 72px; height: 42px; overflow: hidden; border-radius: 14px; box-shadow: inset 0 0 0 1px rgba(114,216,232,.52); pointer-events: none; }
-.buddy-scan-overlay::after { position: absolute; top: 0; left: 0; width: 100%; height: 2px; content: ""; background: #72d8e8; box-shadow: 0 0 8px rgba(114,216,232,.9); animation: buddy-scan-line 620ms ease-in-out infinite alternate; }
-@keyframes buddy-scan-line { to { transform: translateY(39px); } }
-.buddy-thought-spark { position: absolute; z-index: 3; top: 21px; right: 22px; width: 7px; height: 7px; border-radius: 50%; background: var(--mint); box-shadow: 0 0 9px rgba(141,241,189,.8); animation: buddy-spark 900ms ease-in-out infinite alternate; pointer-events: none; }
-@keyframes buddy-spark { to { opacity: .35; transform: translateY(-5px) scale(1.25); } }
-.buddy-analysis-particles { position: absolute; z-index: 3; top: 45px; left: 15px; width: 102px; height: 32px; pointer-events: none; }
-.buddy-analysis-particles i { position: absolute; top: 50%; width: 3px; height: 3px; border-radius: 50%; background: #72f4e8; box-shadow: 0 0 6px rgba(114,244,232,.7); animation: buddy-particle-flow 1s linear infinite; }
-.buddy-analysis-particles i:nth-child(1) { left: 0; animation-delay: 0ms; }.buddy-analysis-particles i:nth-child(2) { left: 18px; animation-delay: 330ms; }.buddy-analysis-particles i:nth-child(3) { left: 36px; animation-delay: 660ms; }
-@keyframes buddy-particle-flow { to { opacity: 0; transform: translateX(72px) scale(.6); } }
 
 .stagger-1, .stagger-2, .stagger-3, .stagger-4 { opacity: 0; transform: translateY(10px); filter: blur(4px); animation: enter 360ms ease-out forwards; }
 .stagger-2 { animation-delay: 70ms; }.stagger-3 { animation-delay: 140ms; }.stagger-4 { animation-delay: 210ms; }
@@ -460,7 +415,7 @@ kbd { display: inline-flex; align-items: center; justify-content: center; min-wi
 .fluent-section { border-radius: var(--corner-overlay) !important; background: var(--surface) !important; backdrop-filter: none !important; -webkit-backdrop-filter: none !important; }
 
 /* Memora owns the foundational Fluent palette. VoiceFlow only maps its
-   domain-specific surfaces (recording, transcripts, and Buddy) onto those
+   domain-specific surfaces (recording and transcripts) onto those
    tokens instead of carrying a second design system. */
 .memora-ui-root {
   --bg: var(--memora-layer);
@@ -562,7 +517,6 @@ kbd { display: inline-flex; align-items: center; justify-content: center; min-wi
   .diff-view,
   .transcript-paper,
   .empty-state,
-  .buddy-menu { border: 1px solid CanvasText; }
   .nav-item--selected { border: 1px solid Highlight; }
   .nav-item__indicator, .status-indicator i, .overlay-dot { forced-color-adjust: none; background: Highlight; }
   .diff-added, .diff-removed { background: transparent; forced-color-adjust: none; }
@@ -579,7 +533,6 @@ kbd { display: inline-flex; align-items: center; justify-content: center; min-wi
 .overlay-button:focus-visible,
 .icon-button:focus-visible,
 .link-button:focus-visible,
-.buddy-menu button:focus-visible,
 textarea:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
 
 .diagnostic-report { max-height: 320px; overflow: auto; padding: 12px; color: var(--ink); background: var(--control-fill); border-radius: var(--corner-control); font-family: "Cascadia Mono", Consolas, monospace; font-size: 11px; line-height: 1.6; white-space: pre-wrap; }
@@ -590,9 +543,6 @@ textarea:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2
 
 html:has(.overlay-surface), html:has(.overlay-surface) body, html:has(.overlay-surface) #root { min-width: 0; min-height: 0; height: 100%; background: transparent; }
 body:has(.overlay-surface) { overflow: hidden; }
-html:has(.buddy-pet), html:has(.buddy-pet) body, html:has(.buddy-pet) #root { min-width: 144px; min-height: 144px; background: transparent; }
-body:has(.buddy-pet) { display: grid; place-items: center; overflow: hidden; }
-body:has(.buddy-pet) #root { min-height: 144px; }
 
 html:has(.assistant-drawer), html:has(.assistant-drawer) body, html:has(.assistant-drawer) #root { min-width: 360px; min-height: 520px; background: transparent; }
 body:has(.assistant-drawer) { overflow: hidden; }
@@ -608,7 +558,7 @@ body:has(.assistant-drawer) { overflow: hidden; }
 .assistant-drawer__composer { padding: 14px 16px 16px; background: rgba(7,10,14,.38); box-shadow: inset 0 1px rgba(255,255,255,.055); }.assistant-drawer__composer label { display: grid; gap: 7px; color: var(--muted); font-size: 9px; font-weight: 650; }.assistant-drawer__composer textarea { min-height: 68px; max-height: 140px; padding: 10px 11px; resize: vertical; color: var(--ink); background: rgba(8,11,15,.74); border: 1px solid rgba(255,255,255,.08); border-radius: 10px; outline: 0; font: 11px/1.5 inherit; }.assistant-drawer__composer textarea:focus { border-color: rgba(118,170,250,.65); box-shadow: 0 0 0 3px rgba(118,170,250,.08); }.assistant-drawer__composer > div { display: flex; align-items: center; gap: 6px; margin-top: 10px; }.assistant-drawer__composer small { margin-right: auto; color: var(--faint); font-size: 8px; }.assistant-drawer__ask { display: inline-flex; align-items: center; gap: 7px; min-width: 76px; min-height: 40px; padding: 0 13px; color: var(--mint-ink); background: var(--mint); border: 0; border-radius: 10px; cursor: pointer; font-size: 10px; font-weight: 700; transition-property: background-color, scale, opacity; transition-duration: 150ms; }.assistant-drawer__ask:hover:not(:disabled) { background: #a0f6ca; }.assistant-drawer__ask:active { scale: .96; }.assistant-drawer__ask:disabled, .assistant-drawer__copy:disabled { opacity: .38; cursor: not-allowed; }
 @keyframes assistant-enter { from { opacity: 0; transform: translateY(8px); filter: blur(4px); } to { opacity: 1; transform: translateY(0); filter: blur(0); } }
 
-/* Buddy thoughts: deliberately small and airy, so the companion—not a utility panel—owns the interaction. */
+/* Assistant thoughts: deliberately small and airy, so the companion—not a utility panel—owns the interaction. */
 html:has(.assistant-thought), html:has(.assistant-thought) body, html:has(.assistant-thought) #root { min-width: 360px; min-height: 260px; background: transparent; }
 .assistant-drawer { display: flex; align-items: flex-end; width: 100vw; height: 100vh; overflow: visible; padding: 0 10px 12px; border-radius: 0; background: transparent; box-shadow: none; backdrop-filter: none; -webkit-backdrop-filter: none; }
 .assistant-thought { width: min(410px, calc(100vw - 20px)); margin: 0 auto; overflow: hidden; border-radius: var(--corner-overlay); color: var(--ink); background: color-mix(in srgb, var(--surface-raised) 78%, transparent); box-shadow: 0 12px 32px rgba(0,0,0,.28), inset 0 0 0 1px var(--divider); backdrop-filter: blur(28px) saturate(1.14); -webkit-backdrop-filter: blur(28px) saturate(1.14); animation: assistant-thought-enter 180ms cubic-bezier(.2,0,0,1) both; }

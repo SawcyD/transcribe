@@ -120,7 +120,6 @@ export interface AppSettings {
   callModeApplication: string;
   callModeOutputDeviceName: string | null;
   theme: "system" | "light" | "dark";
-  buddyStrollEnabled: boolean;
   buddySpeakResponses: boolean;
   assistantEndpoint: string;
   assistantModel: string;
@@ -148,12 +147,11 @@ export interface AppSettings {
   playTones: boolean;
   overlayPosition: OverlayPosition;
   overlayOpacity: number;
-  buddyEnabled: boolean;
-  buddyShowAtStartup: boolean;
-  buddySize: "small" | "medium" | "large";
-  buddyAlwaysOnTop: boolean;
   assistantAllowScreenContext: boolean;
   assistantVoice: string | null;
+  voiceAgentVoice: string;
+  voiceAgentExpressivity: number;
+  numerals: boolean;
   storeRawTranscript: boolean;
   storeNormalizedTranscript: boolean;
   storeCleanedTranscript: boolean;
