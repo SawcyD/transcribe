@@ -336,11 +336,14 @@ html:has(.agent-dock), html:has(.agent-dock) body, html:has(.agent-dock) #root {
 .agent-dock { --assistant: #a78bfa; --you: #7cc0f5; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; gap: 14px; width: 100vw; height: 100vh; padding: 0 10px; overflow: hidden; user-select: none; }
 /* The orb swells with --level (0-1), set from the live loudness in AgentDock.tsx.
    Its spring easing overshoots a little, which is what makes it feel bouncy. */
-.agent-orb { --level: 0; --glow: var(--you); position: relative; width: 92px; height: 92px; overflow: hidden; border-radius: 50%; background: radial-gradient(circle at 30% 24%, #d6eaff 0%, var(--you) 32%, #5b7cf0 66%, var(--assistant) 100%); box-shadow: 0 0 calc(16px + var(--level) * 34px) color-mix(in srgb, var(--glow) 60%, transparent), inset 0 -10px 20px rgb(40 20 90 / .38), inset 0 6px 14px rgb(255 255 255 / .38); transform: scale(calc(1 + var(--level) * .22)); transition: transform 150ms cubic-bezier(.3, 1.7, .5, 1), box-shadow 150ms, filter 320ms; }
+.agent-orb { --level: 0; --glow: var(--you); --bounce: .22; --state-hue: 0deg; --mood-hue: 0deg; --sat: 1; --bright: 1; position: relative; width: 92px; height: 92px; overflow: hidden; border-radius: 50%; background: radial-gradient(circle at 30% 24%, #d6eaff 0%, var(--you) 32%, #5b7cf0 66%, var(--assistant) 100%); box-shadow: 0 0 calc(16px + var(--level) * 34px) color-mix(in srgb, var(--glow) 60%, transparent), inset 0 -10px 20px rgb(40 20 90 / .38), inset 0 6px 14px rgb(255 255 255 / .38); filter: hue-rotate(calc(var(--state-hue) + var(--mood-hue))) saturate(var(--sat)) brightness(var(--bright)); transform: scale(calc(1 + var(--level) * var(--bounce))); transition: transform 150ms cubic-bezier(.3, 1.7, .5, 1), box-shadow 150ms, filter 500ms, translate 500ms, scale 500ms; }
 /* Two soft clouds drift inside it, in opposite directions. */
 .agent-orb::before, .agent-orb::after { position: absolute; inset: -30%; content: ""; background: radial-gradient(circle at 34% 40%, rgb(255 255 255 / .5), transparent 38%), radial-gradient(circle at 72% 66%, color-mix(in srgb, var(--assistant) 80%, white), transparent 44%); filter: blur(10px); }
 .agent-orb::after { opacity: .4; mix-blend-mode: screen; }
-.agent-orb--speaking { --glow: var(--assistant); filter: hue-rotate(24deg) saturate(1.3); }
+.agent-orb--speaking { --glow: var(--assistant); --state-hue: 24deg; --sat: 1.3; }
+/* Mood of the latest line (see mood.ts): happy is warmer, brighter and bouncier; sad is cooler, dimmer and droops. */
+.agent-orb--mood-happy { --mood-hue: 55deg; --sat: 1.45; --bright: 1.08; --bounce: .34; }
+.agent-orb--mood-sad { --mood-hue: -22deg; --sat: .6; --bright: .78; --bounce: .1; translate: 0 5px; scale: .95; }
 .agent-orb--thinking, .agent-orb--connecting { --glow: var(--assistant); }
 .agent-orb--error { --glow: var(--danger); filter: grayscale(.75) brightness(.8); }
 .agent-caption { display: flex; align-items: center; gap: 10px; width: 340px; height: 44px; padding: 0 7px 0 16px; border-radius: 999px; background: color-mix(in srgb, var(--memora-acrylic, #1f1f24) 70%, rgb(14 16 20 / .94)); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ink) 14%, transparent); backdrop-filter: blur(28px); }
@@ -358,6 +361,8 @@ html:has(.agent-dock), html:has(.agent-dock) body, html:has(.agent-dock) #root {
   .agent-orb::before { animation: agent-orb-drift 9s linear infinite; }
   .agent-orb::after { animation: agent-orb-drift 13s linear infinite reverse; }
   .agent-orb--thinking, .agent-orb--connecting { animation: agent-orb-breathe 900ms ease-in-out infinite alternate; }
+  .agent-orb--mood-happy::before { animation-duration: 5s; }
+  .agent-orb--mood-sad::before { animation-duration: 16s; }
   .agent-orb--thinking::before { animation-duration: 2.4s; }
   .agent-orb--thinking::after { animation-duration: 3.2s; }
   .agent-caption { animation: vf-dock-in 240ms cubic-bezier(.2, .9, .3, 1.2) 200ms both; }

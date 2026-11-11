@@ -151,6 +151,8 @@ export interface AppSettings {
   assistantVoice: string | null;
   voiceAgentVoice: string;
   voiceAgentExpressivity: number;
+  voiceAgentCanAct: boolean;
+  wakeWordEnabled: boolean;
   numerals: boolean;
   storeRawTranscript: boolean;
   storeNormalizedTranscript: boolean;

@@ -314,6 +314,16 @@ export function AssistantPage() {
           action={<ToggleSwitch label="Let me interrupt the voice agent" checked={settings.voiceAgentInterruptible} onChange={(value) => void update("voiceAgentInterruptible", value)} />}
         />
         <SettingsRow
+          label={'Wake up on "Hey Flow"'}
+          description="Start a conversation by saying it. Keeps the microphone open; listening for the phrase happens on this PC."
+          action={<ToggleSwitch label="Wake up on Hey Flow" checked={settings.wakeWordEnabled} onChange={(value) => void update("wakeWordEnabled", value)} />}
+        />
+        <SettingsRow
+          label="Let the voice agent open apps and websites"
+          description={'For requests like "open OBS". It can only open things, not change or delete them.'}
+          action={<ToggleSwitch label="Let the voice agent open apps and websites" checked={settings.voiceAgentCanAct} onChange={(value) => void update("voiceAgentCanAct", value)} />}
+        />
+        <SettingsRow
           label="Voice agent voice"
           description="Who you hear in a live conversation. Takes effect on the next conversation."
           action={

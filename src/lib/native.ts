@@ -84,6 +84,8 @@ export const defaultSettings: AppSettings = {
   assistantVoice: null,
   voiceAgentVoice: "flux-kit-en",
   voiceAgentExpressivity: 1,
+  voiceAgentCanAct: true,
+  wakeWordEnabled: false,
   numerals: false,
   storeRawTranscript: true,
   storeNormalizedTranscript: true,

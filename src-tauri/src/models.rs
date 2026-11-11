@@ -252,6 +252,11 @@ pub struct AppSettings {
     pub voice_agent_voice: String,
     /// How animated the voice agent sounds: -2 (calmer) to 2 (more animated).
     pub voice_agent_expressivity: i32,
+    /// Let the voice agent open apps and websites when asked.
+    pub voice_agent_can_act: bool,
+    /// Start the voice agent by saying "Hey Flow". Off by default: it keeps
+    /// the microphone open (recognition is local to this PC).
+    pub wake_word_enabled: bool,
     /// Write spoken numbers as digits ("nine hundred" becomes "900").
     pub numerals: bool,
     pub store_raw_transcript: bool,
@@ -320,6 +325,8 @@ impl Default for AppSettings {
             assistant_voice: None,
             voice_agent_voice: crate::voice_agent::DEFAULT_VOICE.into(),
             voice_agent_expressivity: 1,
+            voice_agent_can_act: true,
+            wake_word_enabled: false,
             numerals: false,
             store_raw_transcript: true,
             store_normalized_transcript: true,

@@ -138,6 +138,24 @@ struct ServerEvent {
     description: Option<String>,
     #[serde(default)]
     message: Option<String>,
+    #[serde(default)]
+    functions: Vec<FunctionCall>,
+}
+
+/// One entry of a FunctionCallRequest: the agent asking us to run a tool.
+#[derive(Deserialize)]
+struct FunctionCall {
+    id: String,
+    name: String,
+    /// The arguments as a JSON string.
+    #[serde(default)]
+    arguments: String,
+    #[serde(default = "yes")]
+    client_side: bool,
+}
+
+fn yes() -> bool {
+    true
 }
 
 fn emit_state(app: &AppHandle, state: &'static str, message: Option<String>) {
@@ -194,7 +212,13 @@ pub async fn start(app: &AppHandle, state: &AppState) -> Result<(), AppError> {
     } else {
         None
     };
-    let settings_message = agent_settings(&settings.voice_agent_voice, settings.voice_agent_expressivity, memory.as_deref());
+    let settings_message = agent_settings(
+        &settings.voice_agent_voice,
+        settings.voice_agent_expressivity,
+        memory.as_deref(),
+        settings.assistant_allow_screen_context,
+        settings.voice_agent_can_act,
+    );
 
     let mut request = AGENT_URL
         .into_client_request()
@@ -257,9 +281,6 @@ pub async fn start(app: &AppHandle, state: &AppState) -> Result<(), AppError> {
     drop(slot);
 
     let app = app.clone();
-    let interruptible = settings.voice_agent_interruptible;
-    let gate = SpeechGate::new(settings.noise_floor_db);
-    let remember = settings.assistant_remember_chats;
     // The capture and player live in this task and stop when it ends.
     tauri::async_runtime::spawn(async move {
         let result = run(
@@ -268,9 +289,7 @@ pub async fn start(app: &AppHandle, state: &AppState) -> Result<(), AppError> {
             microphone,
             &player,
             stop_receiver,
-            interruptible,
-            remember,
-            gate,
+            settings,
         )
         .await;
         drop(capture.stop());
@@ -297,10 +316,14 @@ async fn run(
     mut microphone: mpsc::Receiver<Vec<u8>>,
     player: &Player,
     mut stop: oneshot::Receiver<()>,
-    interruptible: bool,
-    remember: bool,
-    mut gate: SpeechGate,
+    settings: crate::models::AppSettings,
 ) -> Result<(), AppError> {
+    let interruptible = settings.voice_agent_interruptible;
+    let remember = settings.assistant_remember_chats;
+    let mut gate = SpeechGate::new(settings.noise_floor_db);
+    // Tool calls (looking at the screen) take seconds, so they run on the
+    // side and hand their answer back here: (id, name, content).
+    let (tool_done, mut tool_results) = mpsc::unbounded_channel::<(String, String, String)>();
     let state = app.state::<AppState>();
     let chat_id = format!("voice-{}", uuid::Uuid::new_v4());
     let mut pending_question: Option<String> = None;
@@ -324,6 +347,13 @@ async fn run(
                         .map_err(|error| AppError::Transcription(error.to_string()))?;
                 }
             }
+            Some((id, name, content)) = tool_results.recv() => {
+                let reply = serde_json::json!({ "type": "FunctionCallResponse", "id": id, "name": name, "content": content });
+                socket
+                    .send(Message::Text(reply.to_string().into()))
+                    .await
+                    .map_err(|error| AppError::Transcription(error.to_string()))?;
+            }
             _ = level_tick.tick() => {
                 let _ = app.emit("agent-level", player.level());
             }
@@ -344,6 +374,16 @@ async fn run(
                                 emit_state(app, "listening", None);
                             }
                             "AgentThinking" => emit_state(app, "thinking", None),
+                            "FunctionCallRequest" => {
+                                for call in event.functions.into_iter().filter(|call| call.client_side) {
+                                    emit_state(app, "thinking", None);
+                                    let (settings, tool_done) = (settings.clone(), tool_done.clone());
+                                    tauri::async_runtime::spawn(async move {
+                                        let content = run_tool(&settings, &call.name, &call.arguments).await;
+                                        let _ = tool_done.send((call.id, call.name, content));
+                                    });
+                                }
+                            }
                             "AgentStartedSpeaking" => emit_state(app, "speaking", None),
                             "AgentAudioDone" => emit_state(app, "listening", None),
                             "ConversationText" => {
@@ -387,19 +427,44 @@ async fn run(
     }
 }
 
+/// Runs one tool for the agent. Failures go back as text so it can tell the
+/// user what went wrong instead of going silent.
+async fn run_tool(settings: &crate::models::AppSettings, name: &str, arguments: &str) -> String {
+    let arguments: serde_json::Value = serde_json::from_str(arguments).unwrap_or_default();
+    let argument = |key: &str| arguments[key].as_str().unwrap_or_default().to_owned();
+    match name {
+        "look_at_screen" if settings.assistant_allow_screen_context => {
+            let question = Some(argument("question")).filter(|question| !question.is_empty());
+            match crate::assistant::describe_screen(settings, question.as_deref().unwrap_or("What is on the screen?")).await {
+                Ok(description) => description,
+                Err(error) => format!("Couldn't look at the screen: {error}"),
+            }
+        }
+        "open_app" if settings.voice_agent_can_act => crate::launcher::open_app(&argument("name")),
+        "open_website" if settings.voice_agent_can_act => crate::launcher::open_url(&argument("url")),
+        _ => "That tool is not available.".into(),
+    }
+}
+
 /// The Settings message that configures the conversation.
-pub(crate) fn agent_settings(voice: &str, expressivity: i32, memory: Option<&str>) -> serde_json::Value {
+pub(crate) fn agent_settings(voice: &str, expressivity: i32, memory: Option<&str>, can_see_screen: bool, can_act: bool) -> serde_json::Value {
     let voice = if voice.starts_with("flux-") { voice } else { DEFAULT_VOICE };
     let mut prompt = String::from(
-        "You are VoiceFlow's voice assistant, talking with the user out loud. Keep replies short and conversational: one to three sentences, no lists, no Markdown, no code blocks, nothing that only makes sense when read. Ask a short follow-up question when it helps. If you don't know something, say so.
+        "Your name is Flow. You are VoiceFlow's voice assistant, talking with the user out loud. Keep replies short and conversational: one to three sentences, no lists, no Markdown, no code blocks, nothing that only makes sense when read. Ask a short follow-up question when it helps. If you don't know something, say so. Match the user's energy: upbeat when they're excited, gentle when they're down.
 
 If the user asks for a mock interview, interview prep or interview mode, become the interviewer. First ask what role and company it's for and which kind they want (behavioral, technical, or both) unless they already said. With no preference, start with behavioral questions. Ask exactly one question at a time and wait for the full answer. Follow up on vague answers the way a real interviewer would. For technical questions, state the problem clearly, let them think out loud, and give a small hint only if they are stuck or ask. Don't give feedback after each answer unless they ask. Stay in the interviewer role until they say they're done, then give brief, honest feedback: what was strong, what to improve, and one concrete thing to practice.",
     );
+    if can_see_screen {
+        prompt.push_str("\n\nYou can see the user's screen with the look_at_screen tool. Use it when they ask about what they're working on or what's on screen. In a technical interview, use it to read their code when they say they're done, ask for a hint, or ask you to check it. Say a few words first, like \"let me take a look\", because it takes a few seconds.");
+    }
+    if can_act {
+        prompt.push_str("\n\nYou can open apps on the user's computer with open_app and web pages with open_website. Use them when asked, then confirm in a few words. You cannot do anything else on the computer, so say so if asked.");
+    }
     if let Some(memory) = memory {
         prompt.push_str("\n\n");
         prompt.push_str(memory);
     }
-    serde_json::json!({
+    let mut settings = serde_json::json!({
         "type": "Settings",
         "audio": {
             "input": { "encoding": "linear16", "sample_rate": INPUT_RATE },
@@ -409,14 +474,35 @@ If the user asks for a mock interview, interview prep or interview mode, become 
             "language": "en",
             "listen": { "provider": { "type": "deepgram", "model": "nova-3" } },
             "think": {
-                "provider": { "type": "open_ai", "model": "gpt-5.6-luna" },
+                // Not a reasoning model: OpenAI rejects tools combined with reasoning (gpt-5.x) on this API.
+                "provider": { "type": "open_ai", "model": "gpt-4.1", "temperature": 0.7 },
                 "prompt": prompt
             },
             // Flux voices need version v2 and raw linear16 output (set above).
             "speak": { "provider": { "type": "deepgram", "version": "v2", "model": voice, "expressivity": expressivity.clamp(-2, 2) } },
             "greeting": "Hey! What's on your mind?"
         }
-    })
+    });
+    let string = |description: &str| serde_json::json!({ "type": "string", "description": description });
+    let tool = |name: &str, description: &str, argument: &str, argument_description: &str| {
+        serde_json::json!({
+            "name": name,
+            "description": description,
+            "parameters": { "type": "object", "properties": { argument: string(argument_description) }, "required": [argument] }
+        })
+    };
+    let mut tools = Vec::new();
+    if can_see_screen {
+        tools.push(tool("look_at_screen", "Look at the user's screen and get a description of what is on it, including any code.", "question", "What to look for on the screen"));
+    }
+    if can_act {
+        tools.push(tool("open_app", "Open an app installed on the user's computer.", "name", "The app's full official name, for example \"Visual Studio Code\" or \"OBS Studio\""));
+        tools.push(tool("open_website", "Open a web page in the user's browser.", "url", "The full address, starting with https://"));
+    }
+    if !tools.is_empty() {
+        settings["agent"]["think"]["functions"] = tools.into();
+    }
+    settings
 }
 
 /// A short digest of recent saved chats so the agent can pick up threads
@@ -445,8 +531,11 @@ fn show_dock(app: &AppHandle, overlay_position: &str) {
         .ok()
         .and_then(|position| app.monitor_from_point(position.x, position.y).ok().flatten())
         .or_else(|| window.primary_monitor().ok().flatten());
-    if let (Some(monitor), Ok(size)) = (monitor, window.outer_size()) {
-        // Its bottom ("you") pill takes the recording dock's spot.
+    // Placed over the recording dock's spot the first time only: after that it
+    // stays wherever the user dragged it.
+    static PLACED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    let first = !PLACED.swap(true, std::sync::atomic::Ordering::Relaxed);
+    if let (true, Some(monitor), Ok(size)) = (first, monitor, window.outer_size()) {
         let area = crate::dock_layout::MonitorArea::of(&monitor);
         let (x, y, _) = crate::dock_layout::beside_dock(area, overlay_position, (size.width, size.height), true);
         let _ = window.set_position(Position::Physical(PhysicalPosition::new(x, y)));
@@ -497,7 +586,7 @@ mod tests {
 
     #[test]
     fn settings_message_matches_the_agent_api_shape() {
-        let settings = agent_settings("flux-cliff-en", 5, Some("Recent: interview prep"));
+        let settings = agent_settings("flux-cliff-en", 5, Some("Recent: interview prep"), true, true);
         assert_eq!(settings["type"], "Settings");
         assert_eq!(settings["audio"]["input"]["sample_rate"], 16_000);
         assert_eq!(settings["audio"]["output"]["encoding"], "linear16");
@@ -505,7 +594,12 @@ mod tests {
         assert_eq!(settings["agent"]["speak"]["provider"]["model"], "flux-cliff-en");
         assert_eq!(settings["agent"]["speak"]["provider"]["expressivity"], 2);
         assert!(settings["agent"]["think"]["prompt"].as_str().unwrap().contains("interview prep"));
+        assert_eq!(settings["agent"]["think"]["functions"][0]["name"], "look_at_screen");
+        assert_eq!(settings["agent"]["think"]["functions"][1]["name"], "open_app");
+        assert_eq!(settings["agent"]["think"]["functions"][1]["parameters"]["required"][0], "name");
+        // With everything off, the agent is offered no tools.
+        assert!(agent_settings("flux-kit-en", 0, None, false, false)["agent"]["think"]["functions"].is_null());
         // Anything that isn't a Flux voice falls back to the default.
-        assert_eq!(agent_settings("Microsoft Zira", 0, None)["agent"]["speak"]["provider"]["model"], "flux-kit-en");
+        assert_eq!(agent_settings("Microsoft Zira", 0, None, false, false)["agent"]["speak"]["provider"]["model"], "flux-kit-en");
     }
 }

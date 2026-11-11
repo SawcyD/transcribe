@@ -2,6 +2,7 @@ import { PhoneOff } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { captionTail } from "../overlay/OverlayState";
 import { events, native, type AgentState } from "../lib/native";
+import { moodOf } from "./mood";
 
 const AGENT_LABELS: Record<AgentState, string> = {
   connecting: "Connecting…",
@@ -55,12 +56,14 @@ export function AgentDock() {
 
   const label = state === "error" ? (message ?? AGENT_LABELS.error) : AGENT_LABELS[state];
   const showLine = line && (state === "listening" || state === "speaking");
+  // The mood of the latest line stays on the orb until the next one.
+  const mood = line ? moodOf(line.content) : "neutral";
   const speaker = state === "speaking" || (showLine && line.role !== "user") ? "agent" : state === "listening" ? "user" : "idle";
 
   return (
     <div className={`agent-dock${state === "ended" ? " agent-dock--ended" : ""}`} key={session} data-tauri-drag-region>
       <div className="agent-orb-wrap" data-tauri-drag-region>
-        <div ref={orb} className={`agent-orb agent-orb--${state}`} aria-hidden="true" />
+        <div ref={orb} className={`agent-orb agent-orb--${state} agent-orb--mood-${mood}`} data-tauri-drag-region aria-hidden="true" />
       </div>
       <div className="agent-caption" data-tauri-drag-region role="status" aria-live="polite">
         <span className={`agent-caption__dot agent-caption__dot--${speaker}`} aria-hidden="true" />
