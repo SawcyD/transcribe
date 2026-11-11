@@ -151,6 +151,7 @@ export interface AppSettings {
   assistantVoice: string | null;
   voiceAgentVoice: string;
   voiceAgentExpressivity: number;
+  voiceAgentPersonality: "friendly" | "smug" | "professional" | "hype" | "blunt" | "mentor";
   voiceAgentCanAct: boolean;
   wakeWordEnabled: boolean;
   numerals: boolean;
@@ -197,6 +198,7 @@ export interface CredentialStatus {
   deepgram: boolean;
   cleanup: boolean;
   assistant: boolean;
+  search: boolean;
 }
 
 export interface AssistantStateEvent { requestId: string; state: "thinking" | "streaming" | "completed" | "error"; message?: string; }

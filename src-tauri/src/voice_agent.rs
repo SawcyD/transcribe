@@ -212,13 +212,20 @@ pub async fn start(app: &AppHandle, state: &AppState) -> Result<(), AppError> {
     } else {
         None
     };
-    let settings_message = agent_settings(
-        &settings.voice_agent_voice,
-        settings.voice_agent_expressivity,
-        memory.as_deref(),
-        settings.assistant_allow_screen_context,
-        settings.voice_agent_can_act,
-    );
+    let can_search = tokio::task::spawn_blocking(|| security::exists(CredentialKind::Search))
+        .await
+        .unwrap_or(false);
+    let profile = crate::profile::prompt_section(app);
+    let settings_message = agent_settings(&AgentSetup {
+        voice: &settings.voice_agent_voice,
+        expressivity: settings.voice_agent_expressivity,
+        personality: &settings.voice_agent_personality,
+        profile: profile.as_deref(),
+        memory: memory.as_deref(),
+        can_see_screen: settings.assistant_allow_screen_context,
+        can_act: settings.voice_agent_can_act,
+        can_search,
+    });
 
     let mut request = AGENT_URL
         .into_client_request()
@@ -430,6 +437,7 @@ async fn run(
 /// Runs one tool for the agent. Failures go back as text so it can tell the
 /// user what went wrong instead of going silent.
 async fn run_tool(app: &AppHandle, settings: &crate::models::AppSettings, name: &str, arguments: &str) -> String {
+    let raw = arguments;
     let arguments: serde_json::Value = serde_json::from_str(arguments).unwrap_or_default();
     let argument = |key: &str| arguments[key].as_str().unwrap_or_default().to_owned();
     match name {
@@ -442,18 +450,35 @@ async fn run_tool(app: &AppHandle, settings: &crate::models::AppSettings, name: 
         }
         "open_app" if settings.voice_agent_can_act => crate::launcher::open_app(&argument("name")),
         "open_website" if settings.voice_agent_can_act => crate::launcher::open_url(&argument("url")),
-        "draw_on_whiteboard" => crate::commands::draw_on_whiteboard(app, &argument("mermaid")).await,
-        "clear_whiteboard" => {
-            let _ = crate::commands::show_whiteboard(app.clone());
-            let _ = app.emit("whiteboard-clear", ());
-            "Cleared the whiteboard.".into()
-        }
+        "draw_on_whiteboard" => crate::commands::ask_whiteboard(app, "mermaid", raw).await,
+        "add_to_whiteboard" => crate::commands::ask_whiteboard(app, "add", raw).await,
+        "read_whiteboard" => crate::commands::ask_whiteboard(app, "read", raw).await,
+        "erase_from_whiteboard" => crate::commands::ask_whiteboard(app, "erase", raw).await,
+        "clear_whiteboard" => crate::commands::ask_whiteboard(app, "clear", raw).await,
+        "search_web" => crate::launcher::search_web(&argument("query")).await,
+        "remember" => crate::profile::remember(app, &argument("fact")),
         _ => "That tool is not available.".into(),
     }
 }
 
 /// The Settings message that configures the conversation.
-pub(crate) fn agent_settings(voice: &str, expressivity: i32, memory: Option<&str>, can_see_screen: bool, can_act: bool) -> serde_json::Value {
+/// Everything that shapes a conversation, from settings and the user's files.
+pub(crate) struct AgentSetup<'a> {
+    pub voice: &'a str,
+    pub expressivity: i32,
+    pub personality: &'a str,
+    /// The user's flow.md, already formatted as a prompt section.
+    pub profile: Option<&'a str>,
+    /// Recent saved chats, already formatted as a prompt section.
+    pub memory: Option<&'a str>,
+    pub can_see_screen: bool,
+    pub can_act: bool,
+    pub can_search: bool,
+}
+
+pub(crate) fn agent_settings(setup: &AgentSetup) -> serde_json::Value {
+    let AgentSetup { voice, expressivity, personality, profile, memory, can_see_screen, can_act, can_search } = *setup;
+    let personality = crate::personality::get(personality);
     let voice = if voice.starts_with("flux-") { voice } else { DEFAULT_VOICE };
     let mut prompt = String::from(
         "Your name is Flow. You are VoiceFlow's voice assistant, talking with the user out loud. Keep replies short and conversational: one to three sentences, no lists, no Markdown, no code blocks, nothing that only makes sense when read. Ask a short follow-up question when it helps. If you don't know something, say so. Match the user's energy: upbeat when they're excited, gentle when they're down.
@@ -466,10 +491,19 @@ If the user asks for a mock interview, interview prep or interview mode, become 
     if can_act {
         prompt.push_str("\n\nYou can open apps on the user's computer with open_app and web pages with open_website. Use them when asked, then confirm in a few words. You cannot do anything else on the computer, so say so if asked.");
     }
-    prompt.push_str("\n\nYou share a whiteboard with the user. When they are planning or brainstorming, or ask for a diagram, flowchart or notes, draw it with draw_on_whiteboard, then say in one sentence what you drew. Write Mermaid flowchart code with short labels and plain words: no quotes, brackets or special characters inside a label. If you are told the Mermaid could not be drawn, simplify it and try once more. If you can look at the screen, use that to see what the user drew.");
-    if let Some(memory) = memory {
+    prompt.push_str("\n\nYou share a whiteboard with the user and can use all of it. For flowcharts use draw_on_whiteboard with Mermaid flowchart code: short plain labels, no quotes or brackets inside a label. For everything else use add_to_whiteboard: shapes, text, arrows, lines, frames and web embeds, in any colour, size and stroke. To write an explanation, add a rectangle with a label so the text wraps, and give it a soft background colour. Call read_whiteboard first when you need to know what is there, to place something next to the user's work, or to get ids for erase_from_whiteboard. read_whiteboard cannot see inside freehand drawings or pasted images; look at the screen for those if you can. After drawing, say in one sentence what you added. If a drawing is rejected, simplify it and try once more.");
+    if can_search {
+        prompt.push_str("\n\nYou can search the web with search_web. Use it for current facts and best practices, then say what you found in a sentence or two. When the user is planning on the whiteboard, also add the key points there, each with its source link.");
+    }
+    prompt.push_str("\n\nWhen the user asks you to remember something about them, or tells you a lasting preference, save it with remember so you know it next time. Keep each one to a short sentence.");
+    for section in [profile, memory].into_iter().flatten() {
         prompt.push_str("\n\n");
-        prompt.push_str(memory);
+        prompt.push_str(section);
+    }
+    // Last, so the chosen personality sets the tone over the defaults above.
+    if !personality.tone.is_empty() {
+        prompt.push_str("\n\n");
+        prompt.push_str(personality.tone);
     }
     let mut settings = serde_json::json!({
         "type": "Settings",
@@ -487,7 +521,7 @@ If the user asks for a mock interview, interview prep or interview mode, become 
             },
             // Flux voices need version v2 and raw linear16 output (set above).
             "speak": { "provider": { "type": "deepgram", "version": "v2", "model": voice, "expressivity": expressivity.clamp(-2, 2) } },
-            "greeting": "Hey! What's on your mind?"
+            "greeting": personality.greeting
         }
     });
     let string = |description: &str| serde_json::json!({ "type": "string", "description": description });
@@ -506,12 +540,42 @@ If the user asks for a mock interview, interview prep or interview mode, become 
         tools.push(tool("open_app", "Open an app installed on the user's computer.", "name", "The app's full official name, for example \"Visual Studio Code\" or \"OBS Studio\""));
         tools.push(tool("open_website", "Open a web page in the user's browser.", "url", "The full address, starting with https://"));
     }
-    tools.push(tool("draw_on_whiteboard", "Draw a diagram on the whiteboard you share with the user. It is added next to what is already there.", "mermaid", "Mermaid flowchart code, for example: flowchart TD\n  A[Idea] --> B{Worth it}\n  B -->|Yes| C[Build it]"));
+    tools.push(tool("draw_on_whiteboard", "Draw a flowchart on the whiteboard from Mermaid code. It is placed next to what is already there.", "mermaid", "Mermaid flowchart code, for example: flowchart TD\\n  A[Idea] --> B{Worth it}\\n  B -->|Yes| C[Build it]"));
+    tools.push(serde_json::json!({
+        "name": "add_to_whiteboard",
+        "description": "Add shapes, text, arrows, lines, frames or web embeds to the whiteboard. Each element is an object with type (rectangle, ellipse, diamond, text, arrow, line, frame or embeddable), x and y, and usually width and height. Optional on any element: id (unique on the board), strokeColor and backgroundColor (hex colours), fillStyle (solid, hachure, cross-hatch), strokeWidth (1, 2 or 4), strokeStyle (solid, dashed, dotted), roughness (0 neat, 1 hand-drawn, 2 sketchy), roundness ({\"type\": 3} for rounded corners), opacity (0-100), link (a web address). Shapes and arrows take label: {\"text\": \"...\"}. Text takes text and fontSize. Arrows and lines connect shapes with start: {\"id\": \"...\"} and end: {\"id\": \"...\"}, or follow any path with points: [[0,0],[dx,dy],...], which is how to sketch freehand. Frames take name and children (a list of ids). Embeddable takes link.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "elements": { "type": "array", "items": { "type": "object" }, "description": "The elements to add" },
+                "position": { "type": "string", "enum": ["free_space", "as_given"], "description": "free_space (default) moves the group to empty space beside existing content; as_given keeps your x and y, for placing things relative to what read_whiteboard returned" }
+            },
+            "required": ["elements"]
+        }
+    }));
+    tools.push(tool("remember", "Save a short fact or preference about the user to their flow.md profile, so you know it in future conversations.", "fact", "One sentence, for example: Prefers TypeScript and Rust for code"));
+    tools.push(serde_json::json!({
+        "name": "read_whiteboard",
+        "description": "Get everything on the whiteboard as a list: id, type, position, size, text, colour and link of each element.",
+        "parameters": { "type": "object", "properties": {} }
+    }));
+    tools.push(serde_json::json!({
+        "name": "erase_from_whiteboard",
+        "description": "Erase specific elements from the whiteboard by id. Get ids from read_whiteboard.",
+        "parameters": {
+            "type": "object",
+            "properties": { "ids": { "type": "array", "items": { "type": "string" }, "description": "Ids of the elements to erase" } },
+            "required": ["ids"]
+        }
+    }));
     tools.push(serde_json::json!({
         "name": "clear_whiteboard",
         "description": "Erase everything on the whiteboard. Only when the user asks.",
         "parameters": { "type": "object", "properties": {} }
     }));
+    if can_search {
+        tools.push(tool("search_web", "Search the web. Returns a short summary and the top results with their links.", "query", "What to search for"));
+    }
     settings["agent"]["think"]["functions"] = tools.into();
     settings
 }
@@ -563,7 +627,20 @@ fn hide_dock(app: &AppHandle) {
 
 #[cfg(test)]
 mod tests {
-    use super::{agent_settings, SpeechGate, GATE_OPEN_SAMPLES};
+    use super::{agent_settings, AgentSetup, SpeechGate, GATE_OPEN_SAMPLES};
+
+    fn setup(voice: &str) -> AgentSetup<'_> {
+        AgentSetup {
+            voice,
+            expressivity: 0,
+            personality: "friendly",
+            profile: None,
+            memory: None,
+            can_see_screen: false,
+            can_act: false,
+            can_search: false,
+        }
+    }
 
     fn chunk(value: i16) -> Vec<u8> {
         // 10 ms at 16 kHz.
@@ -597,22 +674,38 @@ mod tests {
 
     #[test]
     fn settings_message_matches_the_agent_api_shape() {
-        let settings = agent_settings("flux-cliff-en", 5, Some("Recent: interview prep"), true, true);
+        let settings = agent_settings(&AgentSetup {
+            expressivity: 5,
+            personality: "smug",
+            profile: Some("- Name: Sam"),
+            memory: Some("Recent: interview prep"),
+            can_see_screen: true,
+            can_act: true,
+            can_search: true,
+            ..setup("flux-cliff-en")
+        });
         assert_eq!(settings["type"], "Settings");
         assert_eq!(settings["audio"]["input"]["sample_rate"], 16_000);
         assert_eq!(settings["audio"]["output"]["encoding"], "linear16");
         assert_eq!(settings["agent"]["listen"]["provider"]["model"], "nova-3");
         assert_eq!(settings["agent"]["speak"]["provider"]["model"], "flux-cliff-en");
         assert_eq!(settings["agent"]["speak"]["provider"]["expressivity"], 2);
-        assert!(settings["agent"]["think"]["prompt"].as_str().unwrap().contains("interview prep"));
+        let prompt = settings["agent"]["think"]["prompt"].as_str().unwrap();
+        assert!(prompt.contains("interview prep"));
+        assert!(prompt.contains("- Name: Sam"));
+        // The personality comes last, so it sets the tone.
+        assert!(prompt.trim_end().ends_with("be kind."));
+        assert_eq!(settings["agent"]["greeting"], "Oh, you again. What is it, boss?");
         assert_eq!(settings["agent"]["think"]["functions"][0]["name"], "look_at_screen");
         assert_eq!(settings["agent"]["think"]["functions"][1]["name"], "open_app");
         assert_eq!(settings["agent"]["think"]["functions"][1]["parameters"]["required"][0], "name");
         // With screen and actions off, only the whiteboard tools are offered.
-        let functions = &agent_settings("flux-kit-en", 0, None, false, false)["agent"]["think"]["functions"];
-        assert_eq!(functions.as_array().map(Vec::len), Some(2));
+        let functions = &agent_settings(&setup("flux-kit-en"))["agent"]["think"]["functions"];
+        assert_eq!(functions.as_array().map(Vec::len), Some(6));
+        assert!(!functions.to_string().contains("search_web"));
+        assert!(settings["agent"]["think"]["functions"].to_string().contains("search_web"));
         assert_eq!(functions[0]["name"], "draw_on_whiteboard");
         // Anything that isn't a Flux voice falls back to the default.
-        assert_eq!(agent_settings("Microsoft Zira", 0, None, false, false)["agent"]["speak"]["provider"]["model"], "flux-kit-en");
+        assert_eq!(agent_settings(&setup("Microsoft Zira"))["agent"]["speak"]["provider"]["model"], "flux-kit-en");
     }
 }

@@ -63,7 +63,7 @@ export function HomePage() {
   const navigate = useNavigate();
   const { dictation } = useAppStore();
   const [settings, setSettings] = useState<AppSettings | null>(null);
-  const [credentials, setCredentials] = useState<CredentialStatus>({ deepgram: false, cleanup: false, assistant: false });
+  const [credentials, setCredentials] = useState<CredentialStatus>({ deepgram: false, cleanup: false, assistant: false, search: false });
   const [recent, setRecent] = useState<TranscriptRecord[]>([]);
   const [stats, setStats] = useState<HomeStats | null>(null);
   const [, forceTick] = useState(0);

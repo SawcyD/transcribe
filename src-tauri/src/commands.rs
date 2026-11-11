@@ -215,6 +215,7 @@ pub async fn credential_status() -> Result<CredentialStatus, AppError> {
         deepgram: security::exists(CredentialKind::Deepgram),
         cleanup: security::exists(CredentialKind::Cleanup),
         assistant: security::exists(CredentialKind::Assistant),
+        search: security::exists(CredentialKind::Search),
     })
     .await
     .map_err(|error| AppError::Credential(error.to_string()))
@@ -329,35 +330,100 @@ pub fn show_whiteboard(app: AppHandle) -> Result<(), AppError> {
         .map_err(|error| AppError::Windows(error.to_string()))
 }
 
-/// Has the whiteboard draw a Mermaid diagram for the voice agent, and reports
-/// back whether it worked so the agent can correct invalid Mermaid.
-pub async fn draw_on_whiteboard(app: &AppHandle, mermaid: &str) -> String {
+/// Sends one request from the voice agent to the whiteboard window ("mermaid",
+/// "add", "read", "erase" or "clear", with the tool's JSON arguments) and
+/// returns the board's answer in words the agent can act on.
+pub async fn ask_whiteboard(app: &AppHandle, action: &str, arguments: &str) -> String {
     use tauri::Listener;
-    if mermaid.trim().is_empty() {
-        return "Nothing was drawn: the diagram was empty.".into();
+    // Reading shouldn't pop the window up; anything that draws should.
+    if action != "read" {
+        if let Err(error) = show_whiteboard(app.clone()) {
+            return format!("Couldn't open the whiteboard: {error}");
+        }
     }
-    if let Err(error) = show_whiteboard(app.clone()) {
-        return format!("Couldn't open the whiteboard: {error}");
-    }
+    let id = uuid::Uuid::new_v4().to_string();
     let (sender, receiver) = tokio::sync::oneshot::channel::<String>();
     let sender = std::sync::Mutex::new(Some(sender));
-    let listener = app.once("whiteboard-result", move |event| {
+    let wanted = id.clone();
+    let listener = app.listen("whiteboard-result", move |event| {
+        let Ok(reply) = serde_json::from_str::<serde_json::Value>(event.payload()) else { return };
+        if reply["id"].as_str() != Some(wanted.as_str()) {
+            return;
+        }
         if let Some(sender) = sender.lock().ok().and_then(|mut slot| slot.take()) {
-            let _ = sender.send(event.payload().to_string());
+            let _ = sender.send(reply["text"].as_str().unwrap_or_default().to_owned());
         }
     });
-    let _ = app.emit("whiteboard-draw", mermaid);
-    match tokio::time::timeout(std::time::Duration::from_secs(6), receiver).await {
-        // The board answers with JSON: null when drawn, or the error text.
-        Ok(Ok(payload)) => match serde_json::from_str::<Option<String>>(&payload).ok().flatten() {
-            None => "Drawn on the whiteboard.".into(),
-            Some(error) => format!("That Mermaid could not be drawn ({error}). Fix it and try again."),
-        },
-        _ => {
-            app.unlisten(listener);
-            "Sent to the whiteboard.".into()
-        }
+    let _ = app.emit("whiteboard-request", serde_json::json!({ "id": id, "action": action, "arguments": arguments }));
+    let reply = tokio::time::timeout(std::time::Duration::from_secs(8), receiver).await;
+    app.unlisten(listener);
+    match reply {
+        Ok(Ok(text)) => text,
+        _ => "The whiteboard did not answer in time.".into(),
     }
+}
+
+/// The file a named whiteboard is saved in. Names are restricted so a name can
+/// never point outside the whiteboards folder.
+fn whiteboard_path(app: &AppHandle, name: &str) -> Result<std::path::PathBuf, AppError> {
+    let name = name.trim();
+    let valid = !name.is_empty()
+        && name.chars().count() <= 60
+        && name.chars().all(|c| c.is_alphanumeric() || matches!(c, ' ' | '-' | '_'));
+    if !valid {
+        return Err(AppError::Configuration("whiteboard names can use letters, numbers, spaces, - and _".into()));
+    }
+    let folder = app
+        .path()
+        .app_data_dir()
+        .map_err(|error| AppError::Configuration(error.to_string()))?
+        .join("whiteboards");
+    std::fs::create_dir_all(&folder).map_err(|error| AppError::Configuration(error.to_string()))?;
+    Ok(folder.join(format!("{name}.json")))
+}
+
+/// Opens the user's flow.md in their default editor, creating it if needed.
+#[tauri::command]
+pub fn open_flow_profile(app: AppHandle) -> Result<(), AppError> {
+    let file = crate::profile::path(&app)?;
+    tauri_plugin_opener::open_path(&file, None::<&str>).map_err(|error| AppError::Windows(error.to_string()))
+}
+
+#[tauri::command]
+pub fn list_whiteboards(app: AppHandle) -> Result<Vec<String>, AppError> {
+    let folder = whiteboard_path(&app, "x")?.parent().map(std::path::Path::to_path_buf).unwrap_or_default();
+    let mut names: Vec<String> = std::fs::read_dir(folder)
+        .map_err(|error| AppError::Configuration(error.to_string()))?
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| path.extension().is_some_and(|extension| extension == "json"))
+        .filter_map(|path| path.file_stem().map(|stem| stem.to_string_lossy().into_owned()))
+        .collect();
+    names.sort();
+    Ok(names)
+}
+
+#[tauri::command]
+pub fn load_whiteboard(app: AppHandle, name: String) -> Result<Option<String>, AppError> {
+    match std::fs::read_to_string(whiteboard_path(&app, &name)?) {
+        Ok(content) => Ok(Some(content)),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(AppError::Configuration(error.to_string())),
+    }
+}
+
+#[tauri::command]
+pub fn save_whiteboard(app: AppHandle, name: String, content: String) -> Result<(), AppError> {
+    // Pasted images are stored inside the file, so allow for a few of them.
+    if content.len() > 60_000_000 {
+        return Err(AppError::Configuration("this whiteboard is too large to save".into()));
+    }
+    let path = whiteboard_path(&app, &name)?;
+    // Write beside the file, then swap, so a crash mid-save can't leave half a board.
+    let partial = path.with_extension("json.part");
+    std::fs::write(&partial, content)
+        .and_then(|()| std::fs::rename(&partial, &path))
+        .map_err(|error| AppError::Configuration(error.to_string()))
 }
 
 /// Brings the main window forward on the History page. Used by the overlay's

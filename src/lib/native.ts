@@ -84,6 +84,7 @@ export const defaultSettings: AppSettings = {
   assistantVoice: null,
   voiceAgentVoice: "flux-kit-en",
   voiceAgentExpressivity: 1,
+  voiceAgentPersonality: "friendly",
   voiceAgentCanAct: true,
   wakeWordEnabled: false,
   numerals: false,
@@ -153,6 +154,10 @@ export const native = {
   pasteLatestTranscript: () => call<void>("paste_latest_transcript"),
   showHistory: () => call<void>("show_history"),
   showWhiteboard: () => call<void>("show_whiteboard"),
+  openFlowProfile: () => call<void>("open_flow_profile"),
+  listWhiteboards: () => call<string[]>("list_whiteboards", undefined, []),
+  loadWhiteboard: (name: string) => call<string | null>("load_whiteboard", { name }, null),
+  saveWhiteboard: (name: string, content: string) => call<void>("save_whiteboard", { name, content }),
   openDataFolder: (target: "logs" | "database") => call<void>("open_data_folder", { target }),
   diagnosticReport: () => call<string>("diagnostic_report"),
   clearHistory: () => call<number>("clear_history"),
@@ -162,10 +167,11 @@ export const native = {
     deepgram: false,
     cleanup: false,
     assistant: false,
+    search: false,
   }),
-  setCredential: (provider: "deepgram" | "cleanup" | "assistant", secret: string) =>
+  setCredential: (provider: "deepgram" | "cleanup" | "assistant" | "search", secret: string) =>
     call<void>("set_provider_credential", { provider, secret }),
-  deleteCredential: (provider: "deepgram" | "cleanup" | "assistant") =>
+  deleteCredential: (provider: "deepgram" | "cleanup" | "assistant" | "search") =>
     call<void>("delete_provider_credential", { provider }),
   microphones: () => call<string[]>("list_microphones", undefined, ["System default microphone"]),
   dictionary: () => call<DictionaryEntry[]>("list_dictionary_entries", undefined, []),
@@ -221,11 +227,11 @@ export const events = {
     isTauri() ? listen<{ role: string; content: string }>("agent-transcript", ({ payload }) => handler(payload)) : Promise.resolve(() => undefined),
   agentLevel: (handler: (value: number) => void): Promise<UnlistenFn> =>
     isTauri() ? listen<number>("agent-level", ({ payload }) => handler(payload)) : Promise.resolve(() => undefined),
-  /** Flow asking the whiteboard to draw a Mermaid diagram, or to wipe itself. */
-  whiteboardDraw: (handler: (mermaid: string) => void): Promise<UnlistenFn> =>
-    isTauri() ? listen<string>("whiteboard-draw", ({ payload }) => handler(payload)) : Promise.resolve(() => undefined),
-  whiteboardClear: (handler: () => void): Promise<UnlistenFn> =>
-    isTauri() ? listen("whiteboard-clear", () => handler()) : Promise.resolve(() => undefined),
+  /** Flow asking the whiteboard to draw, read or erase; answered with "whiteboard-result". */
+  whiteboardRequest: (handler: (value: { id: string; action: string; arguments: string }) => void): Promise<UnlistenFn> =>
+    isTauri()
+      ? listen<{ id: string; action: string; arguments: string }>("whiteboard-request", ({ payload }) => handler(payload))
+      : Promise.resolve(() => undefined),
   assistantPlacement: (handler: (value: "above" | "below") => void): Promise<UnlistenFn> =>
     isTauri() ? listen<"above" | "below">("assistant-placement", ({ payload }) => handler(payload)) : Promise.resolve(() => undefined),
 };

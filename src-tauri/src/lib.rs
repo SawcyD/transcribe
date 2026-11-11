@@ -14,6 +14,8 @@ mod sound;
 mod tts;
 mod voice_agent;
 mod launcher;
+mod personality;
+mod profile;
 mod wake_word;
 mod insertion;
 mod models;
@@ -306,6 +308,10 @@ pub fn run() {
             commands::capture_screen_context,
             commands::show_history,
             commands::show_whiteboard,
+            commands::list_whiteboards,
+            commands::load_whiteboard,
+            commands::save_whiteboard,
+            commands::open_flow_profile,
             commands::open_data_folder,
             commands::diagnostic_report,
             commands::clear_history,

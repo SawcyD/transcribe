@@ -24,7 +24,7 @@ function relativeDay(iso: string): string {
 
 export function AssistantPage() {
   const [settings, setSettings] = useState<AppSettings>(defaultSettings);
-  const [credentials, setCredentials] = useState<CredentialStatus>({ deepgram: false, cleanup: false, assistant: false });
+  const [credentials, setCredentials] = useState<CredentialStatus>({ deepgram: false, cleanup: false, assistant: false, search: false });
   const [tab, setTab] = useState<Tab>("chat");
   const [turns, setTurns] = useState<AssistantConversationTurn[]>([]);
   const [chatId, setChatId] = useState<string>(() => crypto.randomUUID());
@@ -35,7 +35,8 @@ export function AssistantPage() {
   const [context, setContext] = useState<ScreenContext | null>(null);
   const [chats, setChats] = useState<AssistantChatSummary[]>([]);
   const [chatSearch, setChatSearch] = useState("");
-  const [keyDialog, setKeyDialog] = useState(false);
+  // Which key is being entered, if any.
+  const [keyDialog, setKeyDialog] = useState<"assistant" | "search" | null>(null);
   const [secret, setSecret] = useState("");
   const conversation = useRef<HTMLDivElement>(null);
   const requestId = useRef<string | null>(null);
@@ -149,10 +150,10 @@ export function AssistantPage() {
   };
 
   const storeKey = async () => {
-    if (!secret.trim()) return;
-    await native.setCredential("assistant", secret.trim());
+    if (!secret.trim() || !keyDialog) return;
+    await native.setCredential(keyDialog, secret.trim());
     setSecret("");
-    setKeyDialog(false);
+    setKeyDialog(null);
     setCredentials(await native.credentialStatus());
   };
 
@@ -327,6 +328,46 @@ export function AssistantPage() {
           action={<ToggleSwitch label="Let the voice agent open apps and websites" checked={settings.voiceAgentCanAct} onChange={(value) => void update("voiceAgentCanAct", value)} />}
         />
         <SettingsRow
+          label="Web search"
+          description="Lets Flow look things up. Needs a free Tavily key from tavily.com; searches are sent to Tavily."
+          action={
+            <span className="voice-picker">
+              <span className="settings-row__value">{credentials.search ? "Configured" : "Not set"}</span>
+              <Button variant="secondary" onClick={() => setKeyDialog("search")}>
+                {credentials.search ? "Replace" : "Add key"}
+              </Button>
+              {credentials.search && (
+                <Button variant="secondary" onClick={() => void native.deleteCredential("search").then(() => native.credentialStatus().then(setCredentials))}>
+                  Remove
+                </Button>
+              )}
+            </span>
+          }
+        />
+        <SettingsRow
+          label="Personality"
+          description="How Flow talks to you. It does the same work in every mode. Takes effect on the next conversation."
+          action={
+            <select className="settings-combo" aria-label="Personality" value={settings.voiceAgentPersonality} onChange={(event) => void update("voiceAgentPersonality", event.target.value as AppSettings["voiceAgentPersonality"])}>
+              <option value="friendly">Friendly</option>
+              <option value="smug">Smug (dry, reluctantly brilliant)</option>
+              <option value="professional">Professional</option>
+              <option value="hype">Hype</option>
+              <option value="blunt">Blunt</option>
+              <option value="mentor">Mentor</option>
+            </select>
+          }
+        />
+        <SettingsRow
+          label="About you (flow.md)"
+          description='A note Flow reads at the start of every conversation: your name, how you like answers, people you mention. Say "Flow, remember…" and it adds to it.'
+          action={
+            <Button variant="secondary" onClick={() => void native.openFlowProfile()}>
+              Edit flow.md
+            </Button>
+          }
+        />
+        <SettingsRow
           label="Voice agent voice"
           description="Who you hear in a live conversation. Takes effect on the next conversation."
           action={
@@ -395,7 +436,7 @@ export function AssistantPage() {
           action={
             <span className="voice-picker">
               <span className="settings-row__value">{credentials.assistant ? "Configured" : "Not set"}</span>
-              <Button variant="secondary" onClick={() => setKeyDialog(true)}>
+              <Button variant="secondary" onClick={() => setKeyDialog("assistant")}>
                 {credentials.assistant ? "Replace" : "Add key"}
               </Button>
               {credentials.assistant && (
@@ -408,8 +449,8 @@ export function AssistantPage() {
         />
       </SettingsSection>
 
-      <ContentDialog open={keyDialog} title="Assistant API key" primaryText="Save" primaryDisabled={!secret.trim()} onPrimary={() => void storeKey()} onClose={() => { setKeyDialog(false); setSecret(""); }}>
-        <p>Used only for the assistant. It is never shown again after saving.</p>
+      <ContentDialog open={keyDialog !== null} title={keyDialog === "search" ? "Web search key" : "Assistant API key"} primaryText="Save" primaryDisabled={!secret.trim()} onPrimary={() => void storeKey()} onClose={() => { setKeyDialog(null); setSecret(""); }}>
+        <p>{keyDialog === "search" ? "Your Tavily API key, from tavily.com. It lets Flow search the web." : "Used only for the assistant."} It is never shown again after saving.</p>
         <input className="settings-input dictionary-quick-add" type="password" aria-label="API key" value={secret} onChange={(event) => setSecret(event.target.value)} />
       </ContentDialog>
     </div>

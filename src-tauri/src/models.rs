@@ -252,6 +252,8 @@ pub struct AppSettings {
     pub voice_agent_voice: String,
     /// How animated the voice agent sounds: -2 (calmer) to 2 (more animated).
     pub voice_agent_expressivity: i32,
+    /// How Flow talks: one of `personality::NAMES`.
+    pub voice_agent_personality: String,
     /// Let the voice agent open apps and websites when asked.
     pub voice_agent_can_act: bool,
     /// Start the voice agent by saying "Hey Flow". Off by default: it keeps
@@ -325,6 +327,7 @@ impl Default for AppSettings {
             assistant_voice: None,
             voice_agent_voice: crate::voice_agent::DEFAULT_VOICE.into(),
             voice_agent_expressivity: 1,
+            voice_agent_personality: "friendly".into(),
             voice_agent_can_act: true,
             wake_word_enabled: false,
             numerals: false,
@@ -424,6 +427,9 @@ impl AppSettings {
         ) {
             return Err("overlay position is not a supported anchor".into());
         }
+        if !crate::personality::NAMES.contains(&self.voice_agent_personality.as_str()) {
+            return Err("unknown voice agent personality".into());
+        }
         if !matches!(self.theme.as_str(), "system" | "light" | "dark") {
             return Err("theme must be system, light, or dark".into());
         }
@@ -457,6 +463,7 @@ pub struct CredentialStatus {
     pub deepgram: bool,
     pub cleanup: bool,
     pub assistant: bool,
+    pub search: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]

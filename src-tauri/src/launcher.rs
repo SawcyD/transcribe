@@ -1,5 +1,6 @@
-//! Opens apps and websites for the voice agent. The agent only supplies a
-//! name to look up or a web address: it never gets to run a command line.
+//! What the voice agent can do outside the app: open apps and websites, and
+//! search the web. It only supplies a name, an address or a query: it never
+//! gets to run a command line.
 
 use std::path::{Path, PathBuf};
 
@@ -68,6 +69,48 @@ pub fn open_url(url: &str) -> String {
     match tauri_plugin_opener::open_url(url, None::<&str>) {
         Ok(()) => format!("Opened {url}."),
         Err(error) => format!("Couldn't open {url}: {error}"),
+    }
+}
+
+/// Searches the web through Tavily and returns a short answer with sources,
+/// as text the agent can read out or put on the whiteboard.
+pub async fn search_web(query: &str) -> String {
+    use crate::security::{self, CredentialKind};
+    if query.trim().is_empty() {
+        return "There was nothing to search for.".into();
+    }
+    let Ok(Ok(key)) = tokio::task::spawn_blocking(|| security::get(CredentialKind::Search)).await else {
+        return "Web search isn't set up. The user can add a Tavily key in the Assistant settings.".into();
+    };
+    let body = serde_json::json!({ "query": query, "search_depth": "basic", "max_results": 5, "include_answer": true });
+    let response = reqwest::Client::new()
+        .post("https://api.tavily.com/search")
+        .bearer_auth(key)
+        .timeout(std::time::Duration::from_secs(15))
+        .json(&body)
+        .send()
+        .await
+        .and_then(|response| response.error_for_status());
+    let found: serde_json::Value = match response {
+        Ok(response) => response.json().await.unwrap_or_default(),
+        Err(error) => return format!("The search failed: {}", error.without_url()),
+    };
+    let mut text = String::new();
+    if let Some(answer) = found["answer"].as_str().filter(|answer| !answer.is_empty()) {
+        text.push_str(&format!("Summary: {answer}\n"));
+    }
+    for result in found["results"].as_array().into_iter().flatten().take(5) {
+        let snippet: String = result["content"].as_str().unwrap_or_default().chars().take(300).collect();
+        text.push_str(&format!(
+            "- {} ({}): {snippet}\n",
+            result["title"].as_str().unwrap_or("Untitled"),
+            result["url"].as_str().unwrap_or_default()
+        ));
+    }
+    if text.is_empty() {
+        "The search found nothing.".into()
+    } else {
+        text
     }
 }
 
