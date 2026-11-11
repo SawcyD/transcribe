@@ -65,9 +65,13 @@ pub(crate) fn listen_url(config: &TranscriptionConfig) -> url::Url {
             .append_pair("interim_results", bool_str(config.interim_results))
             .append_pair("punctuate", bool_str(config.punctuation))
             .append_pair("smart_format", bool_str(config.smart_formatting))
-            .append_pair("endpointing", &config.endpointing_ms.to_string());
+            .append_pair("filler_words", "false")
+            .append_pair("endpointing", &config.endpointing_ms.to_string())
+            .append_pair("utterance_end_ms", "1200")
+            .append_pair("vad_events", "true");
         for keyterm in config.dictionary_keyterms.iter().take(100) {
-            query.append_pair("keyterm", keyterm);
+            // Nova-3 keyterm takes raw term/phrase without :weight intensifiers
+            query.append_pair("keyterm", keyterm.trim());
         }
         if config.developer_mode {
             query
@@ -232,9 +236,12 @@ fn handle_message(
                     if let Some(channel) = response.channel {
                         if let Some(alternative) = channel.alternatives.into_iter().next() {
                             let transcript = alternative.transcript.trim().to_string();
-                            if response.is_final.unwrap_or(false) {
+                            let is_final = response.is_final.unwrap_or(false);
+                            let _speech_final = response.speech_final.unwrap_or(false);
+                            
+                            if is_final {
                                 if !transcript.is_empty() {
-                                    accumulator.final_segments.push(transcript);
+                                    accumulator.final_segments.push(transcript.clone());
                                 }
                                 let _ = event_sender
                                     .send(ProviderEvent::Interim(accumulator.running_text(None)));
@@ -251,6 +258,9 @@ fn handle_message(
                                     response.start.unwrap_or(0.0)
                                         + response.duration.unwrap_or(0.0),
                                 );
+                                
+                                // If speech_final is true, this utterance is complete
+                                // The dictation.rs finish() will handle the full cleanup
                             } else if !transcript.is_empty() {
                                 let running = accumulator.running_text(Some(&transcript));
                                 accumulator.interim_segments.push(transcript);
@@ -263,6 +273,11 @@ fn handle_message(
                     }
                 }
                 "Metadata" => return Ok(true),
+                "UtteranceEnd" => {
+                    // UtteranceEnd signals the end of a speech utterance.
+                    // The accumulated final_segments now represent a complete utterance.
+                    // We don't break here; let Metadata or CloseStream end the session.
+                }
                 "Error" => {
                     return Err(AppError::Transcription(
                         response
@@ -326,6 +341,7 @@ struct DeepgramResponse {
     message_type: String,
     channel: Option<DeepgramChannel>,
     is_final: Option<bool>,
+    speech_final: Option<bool>,
     start: Option<f32>,
     duration: Option<f32>,
     description: Option<String>,

@@ -11,7 +11,9 @@ use crate::{
     cleanup::{
         backtracking::{resolve_explicit_backtracking, resolve_with_options, BacktrackingOptions},
         dictionary::apply_dictionary,
-        voice_actions::extract_trailing_action, CleanupProvider, OpenAiCompatibleCleanup,
+        voice_actions::extract_trailing_action,
+        CleanupProvider,
+        OpenAiCompatibleCleanup,
     },
     errors::AppError,
     insertion,
@@ -295,10 +297,25 @@ pub async fn finish(app: &AppHandle, state: &AppState) -> Result<DictationSnapsh
         .filter(|entry| entry.category == DictionaryCategory::ProtectedIdentifier)
         .map(|entry| entry.display_term.clone())
         .collect::<Vec<_>>();
+    // Collect all enabled dictionary display terms for the <dictionary> section
+    let dictionary_terms: Vec<String> = entries
+        .iter()
+        .filter(|e| e.enabled)
+        .map(|e| e.display_term.clone())
+        .collect();
+    // Build context string from active target
+    let context = active
+        .target
+        .application_name
+        .as_deref()
+        .or(active.target.process_name.as_deref())
+        .map(|name| format!("Active application: {}", name));
     let cleanup = run_cleanup(
         &settings,
         &voice_action.text,
         &protected_terms,
+        context.as_deref(),
+        if dictionary_terms.is_empty() { None } else { Some(dictionary_terms.as_ref()) },
         active.target.process_name.as_deref(),
     )
     .await;
@@ -626,7 +643,7 @@ fn transcription_config(
             settings.cleanup_style_for(process_name).as_str(),
             "developer" | "code_literal"
         ),
-        endpointing_ms: 300,
+        endpointing_ms: 800,
     }
 }
 
@@ -747,6 +764,8 @@ async fn run_cleanup(
     settings: &crate::models::AppSettings,
     text: &str,
     protected_terms: &[String],
+    context: Option<&str>,
+    dictionary_terms: Option<&[String]>,
     active_process: Option<&str>,
 ) -> Result<CleanupResult, AppError> {
     if !settings.cleanup_enabled {
@@ -775,13 +794,9 @@ async fn run_cleanup(
             confidence: 1.0,
         });
     }
-    if style == "balanced" {
-        provider.cleanup(text, protected_terms).await
-    } else {
-        provider
-            .cleanup_with_style(text, protected_terms, &style)
-            .await
-    }
+    provider
+        .cleanup_with_context(text, protected_terms, context, dictionary_terms, &style)
+        .await
 }
 
 /// Recordings shorter than this with no speech are treated as accidental.
