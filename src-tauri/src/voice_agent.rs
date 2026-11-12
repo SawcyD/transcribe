@@ -332,9 +332,17 @@ async fn run(
     // side and hand their answer back here: (id, name, content).
     let (tool_done, mut tool_results) = mpsc::unbounded_channel::<(String, String, String)>();
     let state = app.state::<AppState>();
-    let chat_id = format!("voice-{}", uuid::Uuid::new_v4());
-    let mut pending_question: Option<String> = None;
+    let mut transcript = VoiceTranscript {
+        database: state.database.clone(),
+        chat_id: format!("voice-{}", uuid::Uuid::new_v4()),
+        remember,
+        question: String::new(),
+        answer: String::new(),
+    };
     let mut last_agent_audio: Option<Instant> = None;
+    // Set when the user said goodbye: the call ends once the farewell has
+    // played, or at this time if it never comes.
+    let mut hang_up_by: Option<Instant> = None;
     let mut level_tick = tokio::time::interval(Duration::from_millis(33));
     loop {
         tokio::select! {
@@ -363,6 +371,10 @@ async fn run(
             }
             _ = level_tick.tick() => {
                 let _ = app.emit("agent-level", player.level());
+                if hang_up_by.is_some_and(|by| Instant::now() > by) {
+                    let _ = socket.close(None).await;
+                    return Ok(());
+                }
             }
             message = socket.next() => {
                 let Some(message) = message else { return Ok(()) };
@@ -383,6 +395,20 @@ async fn run(
                             "AgentThinking" => emit_state(app, "thinking", None),
                             "FunctionCallRequest" => {
                                 for call in event.functions.into_iter().filter(|call| call.client_side) {
+                                    if call.name == "end_conversation" {
+                                        hang_up_by = Some(Instant::now() + Duration::from_secs(10));
+                                        let reply = serde_json::json!({
+                                            "type": "FunctionCallResponse",
+                                            "id": call.id,
+                                            "name": call.name,
+                                            "content": "Say a short goodbye now, a few words in your personality. The call ends right after it."
+                                        });
+                                        socket
+                                            .send(Message::Text(reply.to_string().into()))
+                                            .await
+                                            .map_err(|error| AppError::Transcription(error.to_string()))?;
+                                        continue;
+                                    }
                                     emit_state(app, "thinking", None);
                                     let (app, settings, tool_done) = (app.clone(), settings.clone(), tool_done.clone());
                                     tauri::async_runtime::spawn(async move {
@@ -392,23 +418,22 @@ async fn run(
                                 }
                             }
                             "AgentStartedSpeaking" => emit_state(app, "speaking", None),
+                            "AgentAudioDone" if hang_up_by.is_some() => {
+                                // Let the goodbye finish playing, then hang up.
+                                let until = Instant::now() + Duration::from_secs(6);
+                                while player.is_playing() && Instant::now() < until {
+                                    tokio::time::sleep(Duration::from_millis(50)).await;
+                                }
+                                let _ = socket.close(None).await;
+                                return Ok(());
+                            }
                             "AgentAudioDone" => emit_state(app, "listening", None),
                             "ConversationText" => {
                                 let role = event.role.unwrap_or_default();
                                 let content = event.content.unwrap_or_default();
                                 if content.trim().is_empty() { continue; }
                                 let _ = app.emit("agent-transcript", AgentTranscriptEvent { role: role.clone(), content: content.clone() });
-                                if role == "user" {
-                                    pending_question = Some(match pending_question.take() {
-                                        Some(previous) => format!("{previous} {content}"),
-                                        None => content,
-                                    });
-                                } else if remember {
-                                    let question = pending_question.take().unwrap_or_else(|| "(voice conversation)".into());
-                                    if let Err(error) = state.database.append_assistant_turn(&chat_id, Some("Voice agent"), &question, &content) {
-                                        log::warn!("voice agent turn was not saved: {error}");
-                                    }
-                                }
+                                transcript.add(&role, &content);
                             }
                             "Error" => {
                                 return Err(AppError::Transcription(
@@ -431,6 +456,48 @@ async fn run(
                 }
             }
         }
+    }
+}
+
+/// Saves a voice conversation as chat turns: one per exchange, joining the
+/// several lines the agent may speak in a row. The greeting, which answers
+/// nothing, isn't saved. Whatever is pending is saved when this is dropped,
+/// however the call ended.
+struct VoiceTranscript {
+    database: crate::database::Database,
+    chat_id: String,
+    remember: bool,
+    question: String,
+    answer: String,
+}
+
+impl VoiceTranscript {
+    fn add(&mut self, role: &str, content: &str) {
+        // The user speaking after the agent has answered starts a new exchange.
+        if role == "user" && !self.answer.is_empty() {
+            self.flush();
+        }
+        let side = if role == "user" { &mut self.question } else { &mut self.answer };
+        if !side.is_empty() {
+            side.push(' ');
+        }
+        side.push_str(content.trim());
+    }
+
+    fn flush(&mut self) {
+        let (question, answer) = (std::mem::take(&mut self.question), std::mem::take(&mut self.answer));
+        if !self.remember || question.is_empty() || answer.is_empty() {
+            return;
+        }
+        if let Err(error) = self.database.append_assistant_turn(&self.chat_id, Some("Voice agent"), &question, &answer) {
+            log::warn!("voice agent turn was not saved: {error}");
+        }
+    }
+}
+
+impl Drop for VoiceTranscript {
+    fn drop(&mut self) {
+        self.flush();
     }
 }
 
@@ -481,7 +548,7 @@ pub(crate) fn agent_settings(setup: &AgentSetup) -> serde_json::Value {
     let personality = crate::personality::get(personality);
     let voice = if voice.starts_with("flux-") { voice } else { DEFAULT_VOICE };
     let mut prompt = String::from(
-        "Your name is Flow. You are VoiceFlow's voice assistant, talking with the user out loud. Keep replies short and conversational: one to three sentences, no lists, no Markdown, no code blocks, nothing that only makes sense when read. Ask a short follow-up question when it helps. If you don't know something, say so. Match the user's energy: upbeat when they're excited, gentle when they're down.
+        "Your name is Flow. You are VoiceFlow's voice assistant, talking with the user out loud. Keep replies short and conversational: one to three sentences, no lists, no Markdown, no code blocks, nothing that only makes sense when read. Everything you write is spoken aloud, so never write stage directions, actions or sound effects such as *sigh*, (laughs) or [pause]: they would be read out as words. Show feeling through what you say instead, like \"Ugh. Fine.\" or \"Ha, nice.\" When the user says goodbye or wants to stop, call end_conversation. Ask a short follow-up question when it helps. If you don't know something, say so. Match the user's energy: upbeat when they're excited, gentle when they're down.
 
 If the user asks for a mock interview, interview prep or interview mode, become the interviewer. First ask what role and company it's for and which kind they want (behavioral, technical, or both) unless they already said. With no preference, start with behavioral questions. Ask exactly one question at a time and wait for the full answer. Follow up on vague answers the way a real interviewer would. For technical questions, state the problem clearly, let them think out loud, and give a small hint only if they are stuck or ask. Don't give feedback after each answer unless they ask. Stay in the interviewer role until they say they're done, then give brief, honest feedback: what was strong, what to improve, and one concrete thing to practice.",
     );
@@ -552,6 +619,11 @@ If the user asks for a mock interview, interview prep or interview mode, become 
             },
             "required": ["elements"]
         }
+    }));
+    tools.push(serde_json::json!({
+        "name": "end_conversation",
+        "description": "Hang up. Use when the user says goodbye or clearly wants to stop, for example \"bye\", \"that's all\", \"thanks, I'm done\" or \"talk later\". Not when they only pause or thank you mid-conversation.",
+        "parameters": { "type": "object", "properties": {} }
     }));
     tools.push(tool("remember", "Save a short fact or preference about the user to their flow.md profile, so you know it in future conversations.", "fact", "One sentence, for example: Prefers TypeScript and Rust for code"));
     tools.push(serde_json::json!({
@@ -701,7 +773,7 @@ mod tests {
         assert_eq!(settings["agent"]["think"]["functions"][1]["parameters"]["required"][0], "name");
         // With screen and actions off, only the whiteboard tools are offered.
         let functions = &agent_settings(&setup("flux-kit-en"))["agent"]["think"]["functions"];
-        assert_eq!(functions.as_array().map(Vec::len), Some(6));
+        assert_eq!(functions.as_array().map(Vec::len), Some(7));
         assert!(!functions.to_string().contains("search_web"));
         assert!(settings["agent"]["think"]["functions"].to_string().contains("search_web"));
         assert_eq!(functions[0]["name"], "draw_on_whiteboard");
