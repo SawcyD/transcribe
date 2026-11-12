@@ -1,7 +1,9 @@
-import { PhoneOff } from "lucide-react";
+import { getCurrentWindow } from "@tauri-apps/api/window";
+import { MessageSquareText, PhoneOff } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { captionTail } from "../overlay/OverlayState";
-import { events, native, type AgentState } from "../lib/native";
+import { events, isTauri, native, type AgentState } from "../lib/native";
+import { AgentComposer } from "./AgentComposer";
 import { moodOf } from "./mood";
 
 const AGENT_LABELS: Record<AgentState, string> = {
@@ -24,6 +26,8 @@ export function AgentDock() {
   const [line, setLine] = useState<{ role: string; content: string } | null>(null);
   // Bumped per conversation so the orb replays its entrance.
   const [session, setSession] = useState(0);
+  // The type-or-paste box, open in place of the caption.
+  const [composing, setComposing] = useState(false);
   const orb = useRef<HTMLDivElement>(null);
   const live = useRef<AgentState>("connecting");
 
@@ -37,6 +41,7 @@ export function AgentDock() {
         setState(next);
         setMessage(detail);
         if (next !== "speaking" && next !== "listening") setLevel(0);
+        if (next === "connecting" || next === "ended" || next === "error") setComposing(false);
         if (next === "connecting") {
           setLine(null);
           setSession((value) => value + 1);
@@ -60,28 +65,41 @@ export function AgentDock() {
   const mood = line ? moodOf(line.content) : "neutral";
   const speaker = state === "speaking" || (showLine && line.role !== "user") ? "agent" : state === "listening" ? "user" : "idle";
 
+  const openComposer = () => {
+    setComposing(true);
+    // The dock never takes focus on its own; it needs it to be typed into.
+    if (isTauri()) void getCurrentWindow().setFocus();
+  };
+
   return (
-    <div className={`agent-dock${state === "ended" ? " agent-dock--ended" : ""}`} key={session} data-tauri-drag-region>
+    <div className={`agent-dock${state === "ended" ? " agent-dock--ended" : ""}${composing ? " agent-dock--composing" : ""}`} key={session} data-tauri-drag-region>
       <div className="agent-orb-wrap" data-tauri-drag-region>
         <div ref={orb} className={`agent-orb agent-orb--${state} agent-orb--mood-${mood}`} data-tauri-drag-region aria-hidden="true" />
       </div>
-      <div className="agent-caption" data-tauri-drag-region role="status" aria-live="polite">
-        <span className={`agent-caption__dot agent-caption__dot--${speaker}`} aria-hidden="true" />
-        <span className="agent-caption__text">
-          {showLine ? (
-            <span className="agent-caption__line">
-              <bdi>{captionTail(line.content, 140)}</bdi>
-            </span>
-          ) : (
-            <span className="agent-caption__label" key={state}>
-              {label}
-            </span>
-          )}
-        </span>
-        <button type="button" className="agent-caption__end" aria-label="End conversation" title="End conversation" onClick={() => void native.stopVoiceAgent()}>
-          <PhoneOff size={14} />
-        </button>
-      </div>
+      {composing ? (
+        <AgentComposer onClose={() => setComposing(false)} />
+      ) : (
+        <div className="agent-caption" data-tauri-drag-region role="status" aria-live="polite">
+          <span className={`agent-caption__dot agent-caption__dot--${speaker}`} aria-hidden="true" />
+          <span className="agent-caption__text">
+            {showLine ? (
+              <span className="agent-caption__line">
+                <bdi>{captionTail(line.content, 140)}</bdi>
+              </span>
+            ) : (
+              <span className="agent-caption__label" key={state}>
+                {label}
+              </span>
+            )}
+          </span>
+          <button type="button" className="agent-caption__button" aria-label="Type to Flow" title="Type or paste to Flow" onClick={openComposer}>
+            <MessageSquareText size={14} />
+          </button>
+          <button type="button" className="agent-caption__end" aria-label="End conversation" title="End conversation" onClick={() => void native.stopVoiceAgent()}>
+            <PhoneOff size={14} />
+          </button>
+        </div>
+      )}
     </div>
   );
 }

@@ -194,6 +194,8 @@ export const native = {
     call<string>("ask_assistant", { request: { prompt, screenContext, history, chatId } }),
   startVoiceAgent: () => call<void>("start_voice_agent"),
   stopVoiceAgent: () => call<void>("stop_voice_agent"),
+  /** Typed text and pasted images (data: URLs) for the running voice conversation. */
+  agentSendMessage: (text: string, images: string[]) => call<void>("agent_send_message", { text, images }),
   assistantChats: () => call<AssistantChatSummary[]>("list_assistant_chats", undefined, []),
   assistantChat: (id: string) => call<AssistantChatTurn[]>("get_assistant_chat", { id }, []),
   deleteAssistantChat: (id: string) => call<void>("delete_assistant_chat", { id }),

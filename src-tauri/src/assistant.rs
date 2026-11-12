@@ -99,14 +99,25 @@ pub async fn describe_screen(settings: &crate::models::AppSettings, question: &s
     let context = tokio::task::spawn_blocking(crate::context::capture_context)
         .await
         .map_err(|error| AppError::Windows(error.to_string()))??;
-    let (api_key, endpoint, model) = provider(settings).await?;
     let window = context.window_title.unwrap_or_default();
+    describe_image(
+        settings,
+        &context.screenshot_data_url,
+        &format!("This is a screenshot of the user's screen (active window: {window}). In a few plain sentences, describe what is relevant to the request below, quoting any code or text that matters.\n\nRequest: {question}"),
+    )
+    .await
+}
+
+/// Has the assistant's model describe an image (a data: URL) as text, for
+/// the voice agent, which can only take text.
+pub async fn describe_image(settings: &crate::models::AppSettings, data_url: &str, instruction: &str) -> Result<String, AppError> {
+    let (api_key, endpoint, model) = provider(settings).await?;
     let body = serde_json::json!({
         "model": model,
         "messages": [{ "role": "user", "content": [
-            { "type": "text", "text": format!("This is a screenshot of the user's screen (active window: {window}). In a few plain sentences, describe what is relevant to the request below, quoting any code or text that matters.\n\nRequest: {question}") },
+            { "type": "text", "text": instruction },
             // "high" detail: code is unreadable at the low setting.
-            { "type": "image_url", "image_url": { "url": context.screenshot_data_url, "detail": "high" } }
+            { "type": "image_url", "image_url": { "url": data_url, "detail": "high" } }
         ]}]
     });
     let response: NonStreamingChatResponse = reqwest::Client::new()
@@ -117,7 +128,7 @@ pub async fn describe_screen(settings: &crate::models::AppSettings, question: &s
         .send()
         .await
         .and_then(|response| response.error_for_status())
-        .map_err(|error| AppError::Configuration(format!("couldn't read the screen: {error}")))?
+        .map_err(|error| AppError::Configuration(format!("couldn't read the image: {}", error.without_url())))?
         .json()
         .await
         .map_err(|error| AppError::Configuration(error.to_string()))?;
@@ -126,7 +137,7 @@ pub async fn describe_screen(settings: &crate::models::AppSettings, question: &s
         .into_iter()
         .next()
         .map(|choice| choice.message.content)
-        .ok_or_else(|| AppError::Configuration("the model returned no description of the screen".into()))
+        .ok_or_else(|| AppError::Configuration("the model returned no description of the image".into()))
 }
 
 pub async fn start(

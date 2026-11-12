@@ -291,6 +291,7 @@ pub fn run() {
             commands::delete_assistant_chat,
             commands::start_voice_agent,
             commands::stop_voice_agent,
+            commands::agent_send_message,
             commands::list_dictionary_entries,
             commands::dashboard_stats,
             commands::get_settings,

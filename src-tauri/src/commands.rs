@@ -117,6 +117,40 @@ pub async fn start_voice_agent(app: AppHandle, state: State<'_, AppState>) -> Re
     crate::voice_agent::start(&app, &state).await
 }
 
+/// Longest typed message passed to the agent. Longer pastes are cut, not refused.
+const MAX_TYPED_CHARS: usize = 12_000;
+
+/// Sends text typed or pasted into the voice-agent dock, with any pasted
+/// images (data: URLs). The agent only takes text, so each image is first
+/// described by the assistant's model and the description goes along.
+#[tauri::command]
+pub async fn agent_send_message(app: AppHandle, state: State<'_, AppState>, text: String, images: Vec<String>) -> Result<(), AppError> {
+    let text = text.trim().to_string();
+    if text.is_empty() && images.is_empty() {
+        return Err(AppError::Configuration("there is nothing to send".into()));
+    }
+    if images.len() > 4 || images.iter().any(|image| !image.starts_with("data:image/") || image.len() > 8_000_000) {
+        return Err(AppError::Configuration("send up to 4 images, each under 6 MB".into()));
+    }
+    if !crate::voice_agent::is_running(&state).await {
+        return Err(AppError::Configuration("there is no conversation to send this to".into()));
+    }
+    let mut message = text.clone();
+    if !images.is_empty() {
+        let _ = app.emit("agent-state", serde_json::json!({ "state": "thinking", "message": null }));
+        let settings = state.settings.read().await.clone();
+        let instruction = format!(
+            "The user shared this image in a conversation with their voice assistant, with this message: \"{text}\". Describe it in detail for someone who can't see it, quoting any text or code exactly."
+        );
+        for (index, image) in images.iter().enumerate() {
+            let description = crate::assistant::describe_image(&settings, image, &instruction).await?;
+            message.push_str(&format!("\n\n[The user shared image {}. What it shows: {description}]", index + 1));
+        }
+    }
+    let message: String = message.trim().chars().take(MAX_TYPED_CHARS).collect();
+    crate::voice_agent::send_typed(&state, message).await
+}
+
 #[tauri::command]
 pub async fn stop_voice_agent(state: State<'_, AppState>) -> Result<(), AppError> {
     crate::voice_agent::stop(&state).await;

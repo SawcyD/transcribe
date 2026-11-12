@@ -356,6 +356,31 @@ html:has(.agent-dock), html:has(.agent-dock) body, html:has(.agent-dock) #root {
 .agent-caption__end { display: grid; flex: 0 0 auto; place-items: center; width: 30px; height: 30px; color: #fff; background: color-mix(in srgb, var(--danger) 75%, black); border: 0; border-radius: 50%; cursor: pointer; transition: background-color 120ms, transform 120ms cubic-bezier(.2, 0, 0, 1); }
 .agent-caption__end:hover { background: var(--danger); }
 .agent-caption__end:active { transform: scale(.92); }
+.agent-caption__button { display: grid; flex: 0 0 auto; place-items: center; width: 30px; height: 30px; margin-right: -4px; color: var(--ink); background: color-mix(in srgb, var(--ink) 8%, transparent); border: 0; border-radius: 50%; cursor: pointer; transition: background-color 120ms, transform 120ms cubic-bezier(.2, 0, 0, 1); }
+.agent-caption__button:hover { background: color-mix(in srgb, var(--ink) 16%, transparent); }
+.agent-caption__button:active { transform: scale(.92); }
+/* Type-or-paste box: the caption pill grown into a small composer. The orb
+   shrinks to make room, on the same spring the orb uses everywhere else. */
+.agent-orb-wrap { transition: transform 420ms cubic-bezier(.3, 1.4, .5, 1); }
+.agent-dock--composing .agent-orb-wrap { transform: translateY(10px) scale(.62); }
+.agent-composer { display: grid; gap: 6px; width: 340px; padding: 6px; border-radius: 22px; background: color-mix(in srgb, var(--memora-acrylic, #1f1f24) 70%, rgb(14 16 20 / .94)); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--you) 40%, transparent), 0 0 18px color-mix(in srgb, var(--you) 14%, transparent); backdrop-filter: blur(28px); transform-origin: bottom center; }
+.agent-composer__row { display: flex; align-items: flex-end; gap: 6px; }
+.agent-composer textarea { flex: 1 1 auto; min-width: 0; height: 30px; max-height: 76px; padding: 6px 4px; color: var(--ink); font: inherit; font-size: 12.5px; line-height: 18px; background: transparent; border: 0; outline: none; resize: none; }
+.agent-composer textarea::placeholder { color: var(--faint); }
+/* The whole box shows focus instead of a ring around the bare text field. */
+.agent-composer textarea:focus-visible { outline: none; }
+.agent-composer:focus-within { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--you) 75%, transparent), 0 0 22px color-mix(in srgb, var(--you) 22%, transparent); }
+.agent-composer__icon, .agent-composer__send { display: grid; flex: 0 0 auto; place-items: center; width: 30px; height: 30px; border: 0; border-radius: 50%; cursor: pointer; transition: background-color 120ms, opacity 120ms, transform 120ms cubic-bezier(.2, 0, 0, 1); }
+.agent-composer__icon { color: var(--ink); background: color-mix(in srgb, var(--ink) 8%, transparent); }
+.agent-composer__icon:hover:not(:disabled) { background: color-mix(in srgb, var(--ink) 16%, transparent); }
+.agent-composer__send { color: #0b1220; background: var(--you); }
+.agent-composer__icon:active:not(:disabled), .agent-composer__send:active:not(:disabled) { transform: scale(.92); }
+.agent-composer button:disabled { opacity: .4; cursor: default; }
+.agent-composer__extras { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 2px 4px 0; }
+.agent-composer__thumb { position: relative; width: 40px; height: 40px; }
+.agent-composer__thumb img { width: 100%; height: 100%; object-fit: cover; border-radius: 9px; box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ink) 14%, transparent); }
+.agent-composer__thumb button { position: absolute; top: -5px; right: -5px; display: grid; place-items: center; width: 18px; height: 18px; padding: 0; color: var(--ink); background: rgb(20 22 28); border: 1px solid color-mix(in srgb, var(--ink) 20%, transparent); border-radius: 50%; cursor: pointer; }
+.agent-composer__error { color: var(--danger); font-size: 11.5px; }
 @media (prefers-reduced-motion: no-preference) {
   .agent-orb-wrap { animation: agent-orb-rise 620ms cubic-bezier(.2, .9, .3, 1) both; }
   .agent-orb::before { animation: agent-orb-drift 9s linear infinite; }
@@ -366,12 +391,17 @@ html:has(.agent-dock), html:has(.agent-dock) body, html:has(.agent-dock) #root {
   .agent-orb--thinking::before { animation-duration: 2.4s; }
   .agent-orb--thinking::after { animation-duration: 3.2s; }
   .agent-caption { animation: vf-dock-in 240ms cubic-bezier(.2, .9, .3, 1.2) 200ms both; }
+  /* Back from the composer the pill pops in right away, not after the entrance delay. */
+  .agent-dock--composing .agent-caption { animation-delay: 0ms; }
+  .agent-composer { animation: agent-composer-in 300ms cubic-bezier(.3, 1.4, .5, 1) both; }
+  .agent-composer__thumb { animation: vf-pop 300ms cubic-bezier(.2, .9, .3, 1.4) both; }
   .agent-caption__label { display: block; animation: vf-fade-text 160ms ease both; }
   .agent-dock--ended .agent-orb-wrap { animation: agent-orb-sink 420ms cubic-bezier(.5, 0, .9, .4) 600ms both; }
   .agent-dock--ended .agent-caption { animation: vf-dock-out 260ms cubic-bezier(.4, 0, 1, 1) 600ms both; }
 }
 /* Rises from below the window's bottom edge (just above the taskbar), overshoots, settles. */
 @keyframes agent-orb-rise { 0% { opacity: 0; translate: 0 190px; scale: .45; } 55% { opacity: 1; translate: 0 -12px; scale: 1.08; } 78% { translate: 0 4px; scale: .97; } 100% { translate: 0 0; scale: 1; } }
+@keyframes agent-composer-in { from { opacity: 0; transform: translateY(8px) scaleY(.7) scaleX(.96); } to { opacity: 1; transform: none; } }
 @keyframes agent-orb-sink { to { opacity: 0; translate: 0 190px; scale: .45; } }
 @keyframes agent-orb-drift { to { rotate: 360deg; } }
 @keyframes agent-orb-breathe { to { scale: .9; } }

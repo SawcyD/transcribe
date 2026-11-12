@@ -102,6 +102,20 @@ impl SpeechGate {
 
 pub struct AgentHandle {
     stop: Option<oneshot::Sender<()>>,
+    /// Text the user typed (or pasted) into the dock, for the agent to answer.
+    typed: mpsc::UnboundedSender<String>,
+}
+
+/// Passes a typed message into the running conversation, as if spoken.
+pub async fn send_typed(state: &AppState, text: String) -> Result<(), AppError> {
+    let slot = state.voice_agent.lock().await;
+    let handle = slot
+        .as_ref()
+        .ok_or_else(|| AppError::Configuration("there is no conversation to send this to".into()))?;
+    handle
+        .typed
+        .send(text)
+        .map_err(|_| AppError::Configuration("the conversation has ended".into()))
 }
 
 impl AgentHandle {
@@ -282,8 +296,10 @@ pub async fn start(app: &AppHandle, state: &AppState) -> Result<(), AppError> {
     };
 
     let (stop_sender, stop_receiver) = oneshot::channel();
+    let (typed_sender, typed_receiver) = mpsc::unbounded_channel();
     *slot = Some(AgentHandle {
         stop: Some(stop_sender),
+        typed: typed_sender,
     });
     drop(slot);
 
@@ -296,6 +312,7 @@ pub async fn start(app: &AppHandle, state: &AppState) -> Result<(), AppError> {
             microphone,
             &player,
             stop_receiver,
+            typed_receiver,
             settings,
         )
         .await;
@@ -323,6 +340,7 @@ async fn run(
     mut microphone: mpsc::Receiver<Vec<u8>>,
     player: &Player,
     mut stop: oneshot::Receiver<()>,
+    mut typed: mpsc::UnboundedReceiver<String>,
     settings: crate::models::AppSettings,
 ) -> Result<(), AppError> {
     let interruptible = settings.voice_agent_interruptible;
@@ -343,6 +361,8 @@ async fn run(
     // Set when the user said goodbye: the call ends once the farewell has
     // played, or at this time if it never comes.
     let mut hang_up_by: Option<Instant> = None;
+    // The last typed message, so its echo from Deepgram isn't shown or saved twice.
+    let mut last_typed: Option<String> = None;
     let mut level_tick = tokio::time::interval(Duration::from_millis(33));
     loop {
         tokio::select! {
@@ -361,6 +381,18 @@ async fn run(
                         .await
                         .map_err(|error| AppError::Transcription(error.to_string()))?;
                 }
+            }
+            Some(text) = typed.recv() => {
+                // Like speaking over it: stop talking and take the new message.
+                player.clear();
+                let _ = app.emit("agent-transcript", AgentTranscriptEvent { role: "user".into(), content: text.clone() });
+                transcript.add("user", &text);
+                let message = serde_json::json!({ "type": "InjectUserMessage", "content": text });
+                last_typed = Some(text);
+                socket
+                    .send(Message::Text(message.to_string().into()))
+                    .await
+                    .map_err(|error| AppError::Transcription(error.to_string()))?;
             }
             Some((id, name, content)) = tool_results.recv() => {
                 let reply = serde_json::json!({ "type": "FunctionCallResponse", "id": id, "name": name, "content": content });
@@ -432,6 +464,10 @@ async fn run(
                                 let role = event.role.unwrap_or_default();
                                 let content = event.content.unwrap_or_default();
                                 if content.trim().is_empty() { continue; }
+                                if role == "user" && last_typed.as_deref().is_some_and(|typed| typed.trim() == content.trim()) {
+                                    last_typed = None;
+                                    continue;
+                                }
                                 let _ = app.emit("agent-transcript", AgentTranscriptEvent { role: role.clone(), content: content.clone() });
                                 transcript.add(&role, &content);
                             }
