@@ -60,9 +60,17 @@ jobs:
             echo "__NOTES__"
           } >> "$GITHUB_ENV"
 
+      # The wake word engine's DLLs are downloaded into target/release by
+      # this build; tauri.dlls.conf.json then ships them next to the app.
+      # That file's resources replace tauri.conf.json's, so it repeats the
+      # wake word model too.
+      - name: Fetch the wake word engine
+        run: cargo build --release --manifest-path src-tauri/Cargo.toml
+
       - name: Build and publish signed release
         uses: tauri-apps/tauri-action@v1
         with:
+          args: --config src-tauri/tauri.dlls.conf.json
           tagName: v__VERSION__
           releaseName: VoiceFlow v__VERSION__
           # Shown on the GitHub release page and in the app's update dialog.

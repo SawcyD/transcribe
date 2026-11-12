@@ -65,9 +65,16 @@ pub(crate) fn listen_url(config: &TranscriptionConfig) -> url::Url {
             .append_pair("interim_results", bool_str(config.interim_results))
             .append_pair("punctuate", bool_str(config.punctuation))
             .append_pair("smart_format", bool_str(config.smart_formatting))
-            .append_pair("endpointing", &config.endpointing_ms.to_string());
+            .append_pair("filler_words", "false")
+            .append_pair("endpointing", &config.endpointing_ms.to_string())
+            .append_pair("utterance_end_ms", "1200")
+            .append_pair("vad_events", "true");
+        if config.numerals {
+            query.append_pair("numerals", "true");
+        }
         for keyterm in config.dictionary_keyterms.iter().take(100) {
-            query.append_pair("keyterm", keyterm);
+            // Nova-3 keyterm takes raw term/phrase without :weight intensifiers
+            query.append_pair("keyterm", keyterm.trim());
         }
         if config.developer_mode {
             query
@@ -229,12 +236,18 @@ fn handle_message(
             })?;
             match response.message_type.as_str() {
                 "Results" => {
-                    if let Some(channel) = response.channel {
+                    if let Some(channel) = response
+                        .channel
+                        .and_then(|channel| serde_json::from_value::<DeepgramChannel>(channel).ok())
+                    {
                         if let Some(alternative) = channel.alternatives.into_iter().next() {
                             let transcript = alternative.transcript.trim().to_string();
-                            if response.is_final.unwrap_or(false) {
+                            let is_final = response.is_final.unwrap_or(false);
+                            let _speech_final = response.speech_final.unwrap_or(false);
+                            
+                            if is_final {
                                 if !transcript.is_empty() {
-                                    accumulator.final_segments.push(transcript);
+                                    accumulator.final_segments.push(transcript.clone());
                                 }
                                 let _ = event_sender
                                     .send(ProviderEvent::Interim(accumulator.running_text(None)));
@@ -251,6 +264,9 @@ fn handle_message(
                                     response.start.unwrap_or(0.0)
                                         + response.duration.unwrap_or(0.0),
                                 );
+                                
+                                // If speech_final is true, this utterance is complete
+                                // The dictation.rs finish() will handle the full cleanup
                             } else if !transcript.is_empty() {
                                 let running = accumulator.running_text(Some(&transcript));
                                 accumulator.interim_segments.push(transcript);
@@ -263,6 +279,11 @@ fn handle_message(
                     }
                 }
                 "Metadata" => return Ok(true),
+                "UtteranceEnd" => {
+                    // UtteranceEnd signals the end of a speech utterance.
+                    // The accumulated final_segments now represent a complete utterance.
+                    // We don't break here; let Metadata or CloseStream end the session.
+                }
                 "Error" => {
                     return Err(AppError::Transcription(
                         response
@@ -324,8 +345,13 @@ impl Accumulator {
 struct DeepgramResponse {
     #[serde(rename = "type", default)]
     message_type: String,
-    channel: Option<DeepgramChannel>,
+    /// An object on `Results`, but a list of channel indexes on
+    /// `SpeechStarted` and `UtteranceEnd` (sent because of `vad_events` and
+    /// `utterance_end_ms`). Typing it as the object made those messages fail
+    /// to parse, which failed every dictation.
+    channel: Option<serde_json::Value>,
     is_final: Option<bool>,
+    speech_final: Option<bool>,
     start: Option<f32>,
     duration: Option<f32>,
     description: Option<String>,
@@ -366,5 +392,25 @@ impl From<DeepgramWord> for WordTiming {
             end: value.end,
             confidence: value.confidence,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn voice_activity_messages_do_not_fail_the_session() {
+        let (sender, _receiver) = mpsc::unbounded_channel();
+        let mut accumulator = Accumulator::default();
+        for message in [
+            r#"{"type":"SpeechStarted","channel":[0],"timestamp":0.5}"#,
+            r#"{"type":"UtteranceEnd","channel":[0,1],"last_word_end":2.1}"#,
+            r#"{"type":"Results","is_final":true,"start":0.0,"duration":1.0,"channel":{"alternatives":[{"transcript":"hello there","confidence":0.9,"words":[]}]}}"#,
+        ] {
+            let done = handle_message(Message::Text(message.into()), &mut accumulator, &sender).unwrap();
+            assert!(!done);
+        }
+        assert_eq!(accumulator.final_segments, vec!["hello there"]);
     }
 }

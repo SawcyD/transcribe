@@ -327,6 +327,11 @@ export function DictationPage() {
             action={<ToggleSwitch label="Remove filler words" checked={settings.removeFillerWords} onChange={(value) => update("removeFillerWords", value)} />}
           />
           <SettingsRow
+            label="Numbers as digits"
+            description='Writes "nine hundred" as "900".'
+            action={<ToggleSwitch label="Numbers as digits" checked={settings.numerals} onChange={(value) => update("numerals", value)} />}
+          />
+          <SettingsRow
             label="Remove false starts"
             description="Collapses repeated phrases caused by restarting a sentence."
             action={<ToggleSwitch label="Remove false starts" checked={settings.removeFalseStarts} onChange={(value) => update("removeFalseStarts", value)} />}

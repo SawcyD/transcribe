@@ -19,6 +19,19 @@ import type {
   AssistantChatTurn,
 } from "../types/models";
 
+/** A day-planner task (see planner.rs). */
+export interface PlannerTask {
+  id: string;
+  title: string;
+  /** YYYY-MM-DD */
+  day: string;
+  /** HH:MM, or null for any time that day */
+  time: string | null;
+  done: boolean;
+  /** Id of the task this one comes after */
+  after: string | null;
+}
+
 export type AgentState = "connecting" | "listening" | "thinking" | "speaking" | "ended" | "error";
 
 export const isTauri = (): boolean => "__TAURI_INTERNALS__" in window;
@@ -43,7 +56,6 @@ export const defaultSettings: AppSettings = {
   callModeApplication: "Discord",
   callModeOutputDeviceName: null,
   theme: "system",
-  buddyStrollEnabled: false,
   buddySpeakResponses: false,
   assistantEndpoint: "https://api.openai.com/v1",
   assistantModel: "gpt-4.1-mini",
@@ -81,12 +93,14 @@ export const defaultSettings: AppSettings = {
   playTones: true,
   overlayPosition: "bottom_center",
   overlayOpacity: 90,
-  buddyEnabled: true,
-  buddyShowAtStartup: true,
-  buddySize: "medium",
-  buddyAlwaysOnTop: true,
   assistantAllowScreenContext: true,
   assistantVoice: null,
+  voiceAgentVoice: "flux-kit-en",
+  voiceAgentExpressivity: 1,
+  voiceAgentPersonality: "friendly",
+  voiceAgentCanAct: true,
+  wakeWordEnabled: false,
+  numerals: false,
   storeRawTranscript: true,
   storeNormalizedTranscript: true,
   storeCleanedTranscript: true,
@@ -151,9 +165,16 @@ export const native = {
   copyText: (text: string) => call<void>("copy_text", { text }),
   pasteTranscript: (id: string) => call<void>("paste_transcript", { id }),
   pasteLatestTranscript: () => call<void>("paste_latest_transcript"),
-  applyBuddySettings: () => call<void>("apply_buddy_settings"),
   showHistory: () => call<void>("show_history"),
-  showBuddySettings: () => call<void>("show_buddy_settings"),
+  showWhiteboard: () => call<void>("show_whiteboard"),
+  openFlowProfile: () => call<void>("open_flow_profile"),
+  plannerTasks: () => call<PlannerTask[]>("planner_tasks", undefined, []),
+  plannerSaveTask: (task: PlannerTask) => call<PlannerTask>("planner_save_task", { task }),
+  plannerRemoveTask: (id: string) => call<void>("planner_remove_task", { id }),
+  showPlanner: () => call<void>("show_planner", { day: null }),
+  listWhiteboards: () => call<string[]>("list_whiteboards", undefined, []),
+  loadWhiteboard: (name: string) => call<string | null>("load_whiteboard", { name }, null),
+  saveWhiteboard: (name: string, content: string) => call<void>("save_whiteboard", { name, content }),
   openDataFolder: (target: "logs" | "database") => call<void>("open_data_folder", { target }),
   diagnosticReport: () => call<string>("diagnostic_report"),
   clearHistory: () => call<number>("clear_history"),
@@ -163,10 +184,11 @@ export const native = {
     deepgram: false,
     cleanup: false,
     assistant: false,
+    search: false,
   }),
-  setCredential: (provider: "deepgram" | "cleanup" | "assistant", secret: string) =>
+  setCredential: (provider: "deepgram" | "cleanup" | "assistant" | "search", secret: string) =>
     call<void>("set_provider_credential", { provider, secret }),
-  deleteCredential: (provider: "deepgram" | "cleanup" | "assistant") =>
+  deleteCredential: (provider: "deepgram" | "cleanup" | "assistant" | "search") =>
     call<void>("delete_provider_credential", { provider }),
   microphones: () => call<string[]>("list_microphones", undefined, ["System default microphone"]),
   dictionary: () => call<DictionaryEntry[]>("list_dictionary_entries", undefined, []),
@@ -181,7 +203,6 @@ export const native = {
     request: { text, transformId },
   }),
   captureScreenContext: () => call<ScreenContext>("capture_screen_context"),
-  hideBuddy: () => call<void>("hide_buddy"),
   openAssistantDrawer: (screenContext: ScreenContext) => call<void>("open_assistant_drawer", { screenContext }),
   pendingAssistantContext: () => call<ScreenContext | null>("get_pending_assistant_context", undefined, null),
   pendingAssistantVoicePrompt: () => call<string | null>("get_pending_assistant_voice_prompt", undefined, null),
@@ -190,6 +211,8 @@ export const native = {
     call<string>("ask_assistant", { request: { prompt, screenContext, history, chatId } }),
   startVoiceAgent: () => call<void>("start_voice_agent"),
   stopVoiceAgent: () => call<void>("stop_voice_agent"),
+  /** Typed text and pasted images (data: URLs) for the running voice conversation. */
+  agentSendMessage: (text: string, images: string[]) => call<void>("agent_send_message", { text, images }),
   assistantChats: () => call<AssistantChatSummary[]>("list_assistant_chats", undefined, []),
   assistantChat: (id: string) => call<AssistantChatTurn[]>("get_assistant_chat", { id }, []),
   deleteAssistantChat: (id: string) => call<void>("delete_assistant_chat", { id }),
@@ -223,6 +246,15 @@ export const events = {
     isTauri() ? listen<{ role: string; content: string }>("agent-transcript", ({ payload }) => handler(payload)) : Promise.resolve(() => undefined),
   agentLevel: (handler: (value: number) => void): Promise<UnlistenFn> =>
     isTauri() ? listen<number>("agent-level", ({ payload }) => handler(payload)) : Promise.resolve(() => undefined),
+  /** Flow asking the whiteboard to draw, read or erase; answered with "whiteboard-result". */
+  whiteboardRequest: (handler: (value: { id: string; action: string; arguments: string }) => void): Promise<UnlistenFn> =>
+    isTauri()
+      ? listen<{ id: string; action: string; arguments: string }>("whiteboard-request", ({ payload }) => handler(payload))
+      : Promise.resolve(() => undefined),
+  plannerChanged: (handler: () => void): Promise<UnlistenFn> =>
+    isTauri() ? listen("planner-changed", () => handler()) : Promise.resolve(() => undefined),
+  plannerShowDay: (handler: (day: string) => void): Promise<UnlistenFn> =>
+    isTauri() ? listen<string>("planner-show-day", ({ payload }) => handler(payload)) : Promise.resolve(() => undefined),
   assistantPlacement: (handler: (value: "above" | "below") => void): Promise<UnlistenFn> =>
     isTauri() ? listen<"above" | "below">("assistant-placement", ({ payload }) => handler(payload)) : Promise.resolve(() => undefined),
 };

@@ -120,7 +120,6 @@ export interface AppSettings {
   callModeApplication: string;
   callModeOutputDeviceName: string | null;
   theme: "system" | "light" | "dark";
-  buddyStrollEnabled: boolean;
   buddySpeakResponses: boolean;
   assistantEndpoint: string;
   assistantModel: string;
@@ -148,12 +147,14 @@ export interface AppSettings {
   playTones: boolean;
   overlayPosition: OverlayPosition;
   overlayOpacity: number;
-  buddyEnabled: boolean;
-  buddyShowAtStartup: boolean;
-  buddySize: "small" | "medium" | "large";
-  buddyAlwaysOnTop: boolean;
   assistantAllowScreenContext: boolean;
   assistantVoice: string | null;
+  voiceAgentVoice: string;
+  voiceAgentExpressivity: number;
+  voiceAgentPersonality: "friendly" | "smug" | "professional" | "hype" | "blunt" | "mentor";
+  voiceAgentCanAct: boolean;
+  wakeWordEnabled: boolean;
+  numerals: boolean;
   storeRawTranscript: boolean;
   storeNormalizedTranscript: boolean;
   storeCleanedTranscript: boolean;
@@ -197,6 +198,7 @@ export interface CredentialStatus {
   deepgram: boolean;
   cleanup: boolean;
   assistant: boolean;
+  search: boolean;
 }
 
 export interface AssistantStateEvent { requestId: string; state: "thinking" | "streaming" | "completed" | "error"; message?: string; }

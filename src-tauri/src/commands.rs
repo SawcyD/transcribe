@@ -117,6 +117,40 @@ pub async fn start_voice_agent(app: AppHandle, state: State<'_, AppState>) -> Re
     crate::voice_agent::start(&app, &state).await
 }
 
+/// Longest typed message passed to the agent. Longer pastes are cut, not refused.
+const MAX_TYPED_CHARS: usize = 12_000;
+
+/// Sends text typed or pasted into the voice-agent dock, with any pasted
+/// images (data: URLs). The agent only takes text, so each image is first
+/// described by the assistant's model and the description goes along.
+#[tauri::command]
+pub async fn agent_send_message(app: AppHandle, state: State<'_, AppState>, text: String, images: Vec<String>) -> Result<(), AppError> {
+    let text = text.trim().to_string();
+    if text.is_empty() && images.is_empty() {
+        return Err(AppError::Configuration("there is nothing to send".into()));
+    }
+    if images.len() > 4 || images.iter().any(|image| !image.starts_with("data:image/") || image.len() > 8_000_000) {
+        return Err(AppError::Configuration("send up to 4 images, each under 6 MB".into()));
+    }
+    if !crate::voice_agent::is_running(&state).await {
+        return Err(AppError::Configuration("there is no conversation to send this to".into()));
+    }
+    let mut message = text.clone();
+    if !images.is_empty() {
+        let _ = app.emit("agent-state", serde_json::json!({ "state": "thinking", "message": null }));
+        let settings = state.settings.read().await.clone();
+        let instruction = format!(
+            "The user shared this image in a conversation with their voice assistant, with this message: \"{text}\". Describe it in detail for someone who can't see it, quoting any text or code exactly."
+        );
+        for (index, image) in images.iter().enumerate() {
+            let description = crate::assistant::describe_image(&settings, image, &instruction).await?;
+            message.push_str(&format!("\n\n[The user shared image {}. What it shows: {description}]", index + 1));
+        }
+    }
+    let message: String = message.trim().chars().take(MAX_TYPED_CHARS).collect();
+    crate::voice_agent::send_typed(&state, message).await
+}
+
 #[tauri::command]
 pub async fn stop_voice_agent(state: State<'_, AppState>) -> Result<(), AppError> {
     crate::voice_agent::stop(&state).await;
@@ -215,6 +249,7 @@ pub async fn credential_status() -> Result<CredentialStatus, AppError> {
         deepgram: security::exists(CredentialKind::Deepgram),
         cleanup: security::exists(CredentialKind::Cleanup),
         assistant: security::exists(CredentialKind::Assistant),
+        search: security::exists(CredentialKind::Search),
     })
     .await
     .map_err(|error| AppError::Credential(error.to_string()))
@@ -316,36 +351,133 @@ pub async fn capture_screen_context(app: AppHandle) -> Result<ScreenContext, App
     captured
 }
 
+/// Opens the shared whiteboard window (see `src/whiteboard/Whiteboard.tsx`).
 #[tauri::command]
-pub fn hide_buddy(app: AppHandle) -> Result<(), AppError> {
-    app.get_webview_window("buddy")
-        .ok_or_else(|| AppError::Windows("buddy window is unavailable".into()))?
-        .hide()
+pub fn show_whiteboard(app: AppHandle) -> Result<(), AppError> {
+    let window = app
+        .get_webview_window("whiteboard")
+        .ok_or_else(|| AppError::Windows("whiteboard window is unavailable".into()))?;
+    let _ = window.unminimize();
+    let _ = window.show();
+    window
+        .set_focus()
         .map_err(|error| AppError::Windows(error.to_string()))
 }
 
-/// Applies the Buddy visibility, size, and always-on-top settings to its window.
-#[tauri::command]
-pub async fn apply_buddy_settings(app: AppHandle, state: State<'_, AppState>) -> Result<(), AppError> {
-    let settings = state.settings.read().await.clone();
-    let window = app
-        .get_webview_window("buddy")
-        .ok_or_else(|| AppError::Windows("buddy window is unavailable".into()))?;
-    if !settings.buddy_enabled {
-        return window
-            .hide()
-            .map_err(|error| AppError::Windows(error.to_string()));
+/// Sends one request from the voice agent to the whiteboard window ("mermaid",
+/// "add", "read", "erase" or "clear", with the tool's JSON arguments) and
+/// returns the board's answer in words the agent can act on.
+pub async fn ask_whiteboard(app: &AppHandle, action: &str, arguments: &str) -> String {
+    use tauri::Listener;
+    // Reading shouldn't pop the window up; anything that draws should.
+    if action != "read" {
+        if let Err(error) = show_whiteboard(app.clone()) {
+            return format!("Couldn't open the whiteboard: {error}");
+        }
     }
-    let side = match settings.buddy_size.as_str() {
-        "small" => 104u32,
-        "large" => 192,
-        _ => 144,
-    };
-    let _ = window.set_size(tauri::Size::Physical(tauri::PhysicalSize::new(side, side)));
-    let _ = window.set_always_on_top(settings.buddy_always_on_top);
-    window
-        .show()
-        .map_err(|error| AppError::Windows(error.to_string()))
+    let id = uuid::Uuid::new_v4().to_string();
+    let (sender, receiver) = tokio::sync::oneshot::channel::<String>();
+    let sender = std::sync::Mutex::new(Some(sender));
+    let wanted = id.clone();
+    let listener = app.listen("whiteboard-result", move |event| {
+        let Ok(reply) = serde_json::from_str::<serde_json::Value>(event.payload()) else { return };
+        if reply["id"].as_str() != Some(wanted.as_str()) {
+            return;
+        }
+        if let Some(sender) = sender.lock().ok().and_then(|mut slot| slot.take()) {
+            let _ = sender.send(reply["text"].as_str().unwrap_or_default().to_owned());
+        }
+    });
+    let _ = app.emit("whiteboard-request", serde_json::json!({ "id": id, "action": action, "arguments": arguments }));
+    let reply = tokio::time::timeout(std::time::Duration::from_secs(8), receiver).await;
+    app.unlisten(listener);
+    match reply {
+        Ok(Ok(text)) => text,
+        _ => "The whiteboard did not answer in time.".into(),
+    }
+}
+
+/// The file a named whiteboard is saved in. Names are restricted so a name can
+/// never point outside the whiteboards folder.
+fn whiteboard_path(app: &AppHandle, name: &str) -> Result<std::path::PathBuf, AppError> {
+    let name = name.trim();
+    let valid = !name.is_empty()
+        && name.chars().count() <= 60
+        && name.chars().all(|c| c.is_alphanumeric() || matches!(c, ' ' | '-' | '_'));
+    if !valid {
+        return Err(AppError::Configuration("whiteboard names can use letters, numbers, spaces, - and _".into()));
+    }
+    let folder = app
+        .path()
+        .app_data_dir()
+        .map_err(|error| AppError::Configuration(error.to_string()))?
+        .join("whiteboards");
+    std::fs::create_dir_all(&folder).map_err(|error| AppError::Configuration(error.to_string()))?;
+    Ok(folder.join(format!("{name}.json")))
+}
+
+/// Opens the user's flow.md in their default editor, creating it if needed.
+#[tauri::command]
+pub fn open_flow_profile(app: AppHandle) -> Result<(), AppError> {
+    let file = crate::profile::path(&app)?;
+    tauri_plugin_opener::open_path(&file, None::<&str>).map_err(|error| AppError::Windows(error.to_string()))
+}
+
+#[tauri::command]
+pub fn planner_tasks(app: AppHandle) -> Result<Vec<crate::planner::Task>, AppError> {
+    crate::planner::all(&app)
+}
+
+#[tauri::command]
+pub fn planner_save_task(app: AppHandle, task: crate::planner::Task) -> Result<crate::planner::Task, AppError> {
+    crate::planner::save(&app, task)
+}
+
+#[tauri::command]
+pub fn planner_remove_task(app: AppHandle, id: String) -> Result<(), AppError> {
+    crate::planner::remove(&app, &id)
+}
+
+#[tauri::command]
+pub fn show_planner(app: AppHandle, day: Option<String>) -> Result<(), AppError> {
+    crate::planner::show(&app, &day.unwrap_or_else(crate::planner::today))
+}
+
+#[tauri::command]
+pub fn list_whiteboards(app: AppHandle) -> Result<Vec<String>, AppError> {
+    let folder = whiteboard_path(&app, "x")?.parent().map(std::path::Path::to_path_buf).unwrap_or_default();
+    let mut names: Vec<String> = std::fs::read_dir(folder)
+        .map_err(|error| AppError::Configuration(error.to_string()))?
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| path.extension().is_some_and(|extension| extension == "json"))
+        .filter_map(|path| path.file_stem().map(|stem| stem.to_string_lossy().into_owned()))
+        .collect();
+    names.sort();
+    Ok(names)
+}
+
+#[tauri::command]
+pub fn load_whiteboard(app: AppHandle, name: String) -> Result<Option<String>, AppError> {
+    match std::fs::read_to_string(whiteboard_path(&app, &name)?) {
+        Ok(content) => Ok(Some(content)),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(AppError::Configuration(error.to_string())),
+    }
+}
+
+#[tauri::command]
+pub fn save_whiteboard(app: AppHandle, name: String, content: String) -> Result<(), AppError> {
+    // Pasted images are stored inside the file, so allow for a few of them.
+    if content.len() > 60_000_000 {
+        return Err(AppError::Configuration("this whiteboard is too large to save".into()));
+    }
+    let path = whiteboard_path(&app, &name)?;
+    // Write beside the file, then swap, so a crash mid-save can't leave half a board.
+    let partial = path.with_extension("json.part");
+    std::fs::write(&partial, content)
+        .and_then(|()| std::fs::rename(&partial, &path))
+        .map_err(|error| AppError::Configuration(error.to_string()))
 }
 
 /// Brings the main window forward on the History page. Used by the overlay's
@@ -358,19 +490,6 @@ pub fn show_history(app: AppHandle) -> Result<(), AppError> {
     let _ = window.show();
     let _ = window.set_focus();
     app.emit("navigate", "/history")
-        .map_err(|error| AppError::Windows(error.to_string()))
-}
-
-/// Brings the main window forward on the Assistant page, where Buddy's own
-/// settings live. Invoked from Buddy's context menu.
-#[tauri::command]
-pub fn show_buddy_settings(app: AppHandle) -> Result<(), AppError> {
-    let window = app
-        .get_webview_window("main")
-        .ok_or_else(|| AppError::Windows("main window is unavailable".into()))?;
-    let _ = window.show();
-    let _ = window.set_focus();
-    app.emit("navigate", "/assistant-settings")
         .map_err(|error| AppError::Windows(error.to_string()))
 }
 

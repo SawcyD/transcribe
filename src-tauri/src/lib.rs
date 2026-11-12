@@ -13,6 +13,11 @@ mod errors;
 mod sound;
 mod tts;
 mod voice_agent;
+mod launcher;
+mod personality;
+mod planner;
+mod profile;
+mod wake_word;
 mod insertion;
 mod models;
 mod security;
@@ -25,7 +30,7 @@ use tauri::{
     image::Image,
     menu::{Menu, MenuItem, PredefinedMenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    Emitter, Listener, Manager, PhysicalPosition, Position,
+    Emitter, Listener, Manager,
 };
 
 use app_state::AppState;
@@ -43,12 +48,12 @@ pub fn run() {
         }))
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         // Only the main window has a user-chosen size and position. The overlay,
-        // buddy, and assistant windows are positioned programmatically.
+        // and assistant windows are positioned programmatically.
         .plugin(
             tauri_plugin_window_state::Builder::default()
                 // Floating windows are positioned by VoiceFlow and start hidden;
                 // restoring them would reopen e.g. the voice-agent dock at launch.
-                .with_denylist(&["overlay", "buddy", "assistant", "agent"])
+                .with_denylist(&["overlay", "assistant", "agent"])
                 .build(),
         )
         .plugin(tauri_plugin_notification::init())
@@ -77,10 +82,10 @@ pub fn run() {
             let database = database::Database::open(&data_dir.join(DATABASE_FILE))?;
             let settings = database.load_settings()?;
             app.manage(AppState::new(database, settings));
+            wake_word::spawn(app.handle().clone());
             tauri::async_runtime::spawn(dictation::warm_up_transcription(app.handle().clone()));
             setup_tray(app)?;
             watch_tray_state(app);
-            show_buddy(app);
             let mut receiver = {
                 let state = app.state::<AppState>();
                 let bindings = tauri::async_runtime::block_on(state.settings.read())
@@ -239,6 +244,15 @@ pub fn run() {
             Ok(())
         })
         .on_window_event(|window, event| {
+            // The whiteboard and planner hide instead of closing, so Flow can
+            // reopen them and nothing is lost.
+            if matches!(window.label(), "whiteboard" | "planner") {
+                if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                    api.prevent_close();
+                    let _ = window.hide();
+                }
+                return;
+            }
             if window.label() != "main" {
                 return;
             }
@@ -278,6 +292,7 @@ pub fn run() {
             commands::delete_assistant_chat,
             commands::start_voice_agent,
             commands::stop_voice_agent,
+            commands::agent_send_message,
             commands::list_dictionary_entries,
             commands::dashboard_stats,
             commands::get_settings,
@@ -293,10 +308,16 @@ pub fn run() {
             commands::save_dictionary_entry,
             commands::delete_dictionary_entry,
             commands::capture_screen_context,
-            commands::hide_buddy,
-            commands::apply_buddy_settings,
             commands::show_history,
-            commands::show_buddy_settings,
+            commands::show_whiteboard,
+            commands::list_whiteboards,
+            commands::load_whiteboard,
+            commands::save_whiteboard,
+            commands::open_flow_profile,
+            commands::planner_tasks,
+            commands::planner_save_task,
+            commands::planner_remove_task,
+            commands::show_planner,
             commands::open_data_folder,
             commands::diagnostic_report,
             commands::clear_history,
@@ -485,32 +506,6 @@ fn show_main_window(app: &tauri::AppHandle) {
         let _ = window.show();
         let _ = window.set_focus();
     }
-}
-
-fn show_buddy(app: &tauri::App) {
-    let Some(window) = app.get_webview_window("buddy") else {
-        return;
-    };
-    let settings = tauri::async_runtime::block_on(app.state::<AppState>().settings.read()).clone();
-    if !settings.buddy_enabled || !settings.buddy_show_at_startup {
-        let _ = window.hide();
-        return;
-    }
-    let side = match settings.buddy_size.as_str() {
-        "small" => 104u32,
-        "large" => 192,
-        _ => 144,
-    };
-    let _ = window.set_size(tauri::Size::Physical(tauri::PhysicalSize::new(side, side)));
-    if let Ok(Some(monitor)) = window.primary_monitor() {
-        let size = monitor.size();
-        let origin = monitor.position();
-        let x = origin.x + size.width.saturating_sub(176) as i32;
-        let y = origin.y + size.height.saturating_sub(178) as i32;
-        let _ = window.set_position(Position::Physical(PhysicalPosition::new(x, y)));
-    }
-    let _ = window.set_always_on_top(settings.buddy_always_on_top);
-    let _ = window.show();
 }
 
 #[derive(Clone, Copy)]

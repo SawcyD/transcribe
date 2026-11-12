@@ -36,9 +36,163 @@ pub fn resolve_with_options(input: &str, options: BacktrackingOptions) -> String
         text = remove_fillers(&text);
     }
     if options.remove_false_starts {
-        text = remove_repeated_phrases(&text);
+        text = collapse_stutters(&text);
     }
     clean_spacing(&text)
+}
+
+/// Collapse adjacent word and phrase stutters caused by speaking hesitation.
+fn collapse_stutters(input: &str) -> String {
+    let words: Vec<String> = input
+        .split_whitespace()
+        .map(str::to_string)
+        .collect();
+
+    // Single pass: at each position, find the largest n-gram repetition (up to 3)
+    // and collapse it, preferring longer matches
+    let mut result = Vec::with_capacity(words.len());
+    let mut i = 0;
+    while i < words.len() {
+        let mut matched = false;
+        // Try 3-gram, then 2-gram, then 1-gram
+        for n in [3, 2, 1] {
+            if i + n * 2 <= words.len() {
+                let same = (0..n).all(|offset| {
+                    normalize_token(&words[i + offset]) == normalize_token(&words[i + n + offset])
+                });
+                if same {
+                    // Keep first occurrence, preserve trailing punctuation from last repetition
+                    let mut kept = words[i..i + n].to_vec();
+                    if let Some(last_repeated) = words.get(i + n * 2 - 1) {
+                        let punct: String = last_repeated
+                            .chars()
+                            .rev()
+                            .take_while(|c| !c.is_alphanumeric() && *c != '_')
+                            .collect::<String>()
+                            .chars()
+                            .rev()
+                            .collect();
+                        if !punct.is_empty() {
+                            if let Some(last_kept) = kept.last_mut() {
+                                let trimmed = last_kept
+                                    .trim_end_matches(|c: char| !c.is_alphanumeric() && c != '_')
+                                    .to_string();
+                                *last_kept = format!("{}{}", trimmed, punct);
+                            }
+                        }
+                    }
+                    result.extend(kept);
+                    i += n * 2;
+                    // Skip any additional consecutive repetitions of the same n-gram
+                    while i + n <= words.len()
+                        && (0..n).all(|offset| {
+                            normalize_token(&words[i - n + offset])
+                                == normalize_token(&words[i + offset])
+                        })
+                    {
+                        // Also transfer punctuation from additional repetitions
+                        if let Some(last_repeated) = words.get(i + n - 1) {
+                            let punct: String = last_repeated
+                                .chars()
+                                .rev()
+                                .take_while(|c| !c.is_alphanumeric() && *c != '_')
+                                .collect::<String>()
+                                .chars()
+                                .rev()
+                                .collect();
+                            if !punct.is_empty() {
+                                if let Some(last_kept) = result.last_mut() {
+                                    let trimmed = last_kept
+                                        .trim_end_matches(|c: char| !c.is_alphanumeric() && c != '_')
+                                        .to_string();
+                                    *last_kept = format!("{}{}", trimmed, punct);
+                                }
+                            }
+                        }
+                        i += n;
+                    }
+                    matched = true;
+                    break;
+                }
+            }
+        }
+        if !matched {
+            result.push(words[i].clone());
+            i += 1;
+        }
+    }
+
+    // Then handle preposition/article false-start collisions (same preposition only)
+    result = collapse_preposition_restarts(result);
+
+    result.join(" ")
+}
+
+/// Collapse immediate preposition/article false-start collisions.
+/// Pattern 1: `<prep> <word1> <same_prep> <word2>` -> `<same_prep> <word2>`
+///   e.g., "do it on actual on Windows" -> "do it on Windows"
+/// Pattern 2: `<spatial_prep1> <word1> <spatial_prep2> <word2>` where both are spatial prepositions
+///   -> `<spatial_prep2> <word2>` (speaker switches spatial preposition mid-phrase)
+///   e.g., "work in on Windows" -> "work on Windows"
+fn collapse_preposition_restarts(words: Vec<String>) -> Vec<String> {
+    let spatial_prepositions = [
+        "in", "on", "at", "to", "from", "into", "onto", "upon", "within", "without",
+        "through", "across", "over", "under", "beneath", "behind", "beside", "beyond",
+        "near", "above", "below",
+    ];
+    let articles = ["a", "an", "the"];
+
+    let is_spatial_prep = |word: &str| {
+        spatial_prepositions.contains(&word.to_ascii_lowercase().as_str())
+    };
+    let is_article = |word: &str| {
+        articles.contains(&word.to_ascii_lowercase().as_str())
+    };
+
+    let mut result = Vec::with_capacity(words.len());
+    let mut i = 0;
+    while i < words.len() {
+        // Pattern 1: prep/article word1 SAME_prep/article word2
+        if i + 3 < words.len() {
+            let w0 = &words[i];
+            let _w1 = &words[i + 1];
+            let w2 = &words[i + 2];
+            let w3 = &words[i + 3];
+
+            let w0_is_spatial = is_spatial_prep(w0);
+            let w0_is_article = is_article(w0);
+            let w2_is_spatial = is_spatial_prep(w2);
+            let w2_is_article = is_article(w2);
+
+            if (w0_is_spatial || w0_is_article) && (w2_is_spatial || w2_is_article) {
+                let norm_w0 = normalize_token(w0);
+                let norm_w2 = normalize_token(w2);
+                if norm_w0 == norm_w2 {
+                    result.push(w2.clone());
+                    result.push(w3.clone());
+                    i += 4;
+                    continue;
+                }
+            }
+        }
+
+        // Pattern 2: adjacent spatial prepositions (prep1 prep2) -> keep prep2
+        // e.g., "work in on Windows" -> "work on Windows"
+        // But not if first prep is "to" (likely infinitive)
+        if i + 1 < words.len() {
+            let w0 = &words[i];
+            let w1 = &words[i + 1];
+            if is_spatial_prep(w0) && is_spatial_prep(w1) && !w0.eq_ignore_ascii_case("to") {
+                result.push(w1.clone());
+                i += 2;
+                continue;
+            }
+        }
+
+        result.push(words[i].clone());
+        i += 1
+    }
+    result
 }
 
 fn remove_delete_last_sentence(input: &str) -> String {
@@ -84,7 +238,8 @@ fn apply_replace_command(input: &str) -> String {
         .map(|value| value.as_str().trim())
         .unwrap_or_default();
     let prefix = input[..full.start()].trim_end_matches([',', ' ', '.', ';']);
-    let occurrence = RegexBuilderExt::literal(old);
+    let occurrence = Regex::new(&format!(r"(?i)\b{}\b", regex::escape(old)))
+        .expect("escaped literal is valid");
     if occurrence.is_match(prefix) {
         format!("{}.", occurrence.replace_all(prefix, new))
             .trim()
@@ -184,34 +339,6 @@ fn remove_fillers(input: &str) -> String {
     fillers.replace_all(input, "$1$3").into_owned()
 }
 
-fn remove_repeated_phrases(input: &str) -> String {
-    let mut words = input
-        .split_whitespace()
-        .map(str::to_string)
-        .collect::<Vec<_>>();
-    let mut changed = true;
-    while changed {
-        changed = false;
-        'search: for size in (1..=4).rev() {
-            if words.len() < size * 2 {
-                continue;
-            }
-            for index in 0..=words.len() - size * 2 {
-                let same = (0..size).all(|offset| {
-                    normalize_token(&words[index + offset])
-                        == normalize_token(&words[index + size + offset])
-                });
-                if same {
-                    words.drain(index..index + size);
-                    changed = true;
-                    break 'search;
-                }
-            }
-        }
-    }
-    words.join(" ")
-}
-
 fn normalize_token(value: &str) -> String {
     value
         .trim_matches(|character: char| !character.is_alphanumeric() && character != '_')
@@ -224,16 +351,6 @@ fn clean_spacing(input: &str) -> String {
     let collapsed = spaces.replace_all(input.trim(), " ");
     let normalized = punctuation.replace_all(&collapsed, "$1");
     normalized.trim_start_matches([',', ';']).trim().to_string()
-}
-
-struct RegexBuilderExt;
-impl RegexBuilderExt {
-    fn literal(value: &str) -> Regex {
-        regex::RegexBuilder::new(&regex::escape(value))
-            .case_insensitive(true)
-            .build()
-            .expect("escaped literal is valid")
-    }
 }
 
 #[cfg(test)]
@@ -287,6 +404,104 @@ mod tests {
         assert_eq!(
             resolve_explicit_backtracking("Um, the meeting the meeting is basically tomorrow."),
             "the meeting is tomorrow."
+        );
+    }
+
+    // Phase 2: New tests for collapse_stutters
+    #[test]
+    fn collapses_single_word_stutters() {
+        assert_eq!(
+            resolve_with_options(
+                "Let's say you have a glass a glass like UI",
+                BacktrackingOptions::default()
+            ),
+            "Let's say you have a glass like UI"
+        );
+        assert_eq!(
+            resolve_with_options(
+                "I I think we should go",
+                BacktrackingOptions::default()
+            ),
+            "I think we should go"
+        );
+        assert_eq!(
+            resolve_with_options(
+                "The the the meeting is tomorrow",
+                BacktrackingOptions::default()
+            ),
+            "The meeting is tomorrow"
+        );
+    }
+
+    #[test]
+    fn collapses_bigram_phrase_repetitions() {
+        assert_eq!(
+            resolve_with_options(
+                "Is there is there a way to do this",
+                BacktrackingOptions::default()
+            ),
+            "Is there a way to do this"
+        );
+        assert_eq!(
+            resolve_with_options(
+                "I think I think we should go",
+                BacktrackingOptions::default()
+            ),
+            "I think we should go"
+        );
+    }
+
+    #[test]
+    fn collapses_trigram_phrase_repetitions() {
+        assert_eq!(
+            resolve_with_options(
+                "I want to I want to I want to go home",
+                BacktrackingOptions::default()
+            ),
+            "I want to go home"
+        );
+    }
+
+    #[test]
+    fn collapses_preposition_restarts() {
+        assert_eq!(
+            resolve_with_options(
+                "Is there a way for glass morphism to work in on Windows?",
+                BacktrackingOptions::default()
+            ),
+            "Is there a way for glass morphism to work on Windows?"
+        );
+        assert_eq!(
+            resolve_with_options(
+                "I'm not sure if you can do it on actual on Windows.",
+                BacktrackingOptions::default()
+            ),
+            "I'm not sure if you can do it on Windows."
+        );
+        assert_eq!(
+            resolve_with_options(
+                "Work in on the project",
+                BacktrackingOptions::default()
+            ),
+            "Work on the project"
+        );
+    }
+
+    #[test]
+    fn preserves_trailing_punctuation_on_kept_token() {
+        assert_eq!(
+            resolve_with_options(
+                "The the meeting is tomorrow.",
+                BacktrackingOptions::default()
+            ),
+            "The meeting is tomorrow."
+        );
+        assert_eq!(
+            resolve_with_options(
+                "Let's go, go, go!",
+                BacktrackingOptions::default()
+            ),
+            "Let's go!"
         );
     }
 }

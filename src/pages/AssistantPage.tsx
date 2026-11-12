@@ -1,13 +1,15 @@
-import { AudioLines, History, MessageSquarePlus, Monitor, Send, Trash2, X } from "lucide-react";
+import { AudioLines, CalendarDays, History, PenLine, MessageSquarePlus, Monitor, Send, Trash2, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "../components/common/Button";
+import { PageTabs } from "../components/common/PageTabs";
+import { usePageTab } from "../components/common/usePageTab";
 import { ContentDialog } from "../components/fluent/ContentDialog";
 import { InfoBar } from "../components/fluent/InfoBar";
 import { SettingsRow, SettingsSection } from "../components/fluent/SettingsRow";
 import { ToggleSwitch } from "../components/fluent/ToggleSwitch";
 import { MiniMarkdown } from "../lib/miniMarkdown";
 import { defaultSettings, events, native } from "../lib/native";
-import { ASSISTANT_VOICES, speak } from "../lib/speech";
+import { ASSISTANT_VOICES, VOICE_AGENT_VOICES, speak } from "../lib/speech";
 import type { AppSettings, AssistantChatSummary, AssistantConversationTurn, CredentialStatus, ScreenContext } from "../types/models";
 
 type Tab = "chat" | "saved";
@@ -22,9 +24,17 @@ function relativeDay(iso: string): string {
   return date.toLocaleDateString([], { month: "short", day: "numeric" });
 }
 
+/** Chat up front; Flow's and the chat's settings each get their own tab. */
+const ASSISTANT_TABS = [
+  { id: "chat", label: "Chat" },
+  { id: "flow", label: "Flow voice agent" },
+  { id: "settings", label: "Chat settings" },
+] as const;
+
 export function AssistantPage() {
   const [settings, setSettings] = useState<AppSettings>(defaultSettings);
-  const [credentials, setCredentials] = useState<CredentialStatus>({ deepgram: false, cleanup: false, assistant: false });
+  const [credentials, setCredentials] = useState<CredentialStatus>({ deepgram: false, cleanup: false, assistant: false, search: false });
+  const [section, setSection] = usePageTab(ASSISTANT_TABS);
   const [tab, setTab] = useState<Tab>("chat");
   const [turns, setTurns] = useState<AssistantConversationTurn[]>([]);
   const [chatId, setChatId] = useState<string>(() => crypto.randomUUID());
@@ -35,7 +45,8 @@ export function AssistantPage() {
   const [context, setContext] = useState<ScreenContext | null>(null);
   const [chats, setChats] = useState<AssistantChatSummary[]>([]);
   const [chatSearch, setChatSearch] = useState("");
-  const [keyDialog, setKeyDialog] = useState(false);
+  // Which key is being entered, if any.
+  const [keyDialog, setKeyDialog] = useState<"assistant" | "search" | null>(null);
   const [secret, setSecret] = useState("");
   const conversation = useRef<HTMLDivElement>(null);
   const requestId = useRef<string | null>(null);
@@ -149,10 +160,10 @@ export function AssistantPage() {
   };
 
   const storeKey = async () => {
-    if (!secret.trim()) return;
-    await native.setCredential("assistant", secret.trim());
+    if (!secret.trim() || !keyDialog) return;
+    await native.setCredential(keyDialog, secret.trim());
     setSecret("");
-    setKeyDialog(false);
+    setKeyDialog(null);
     setCredentials(await native.credentialStatus());
   };
 
@@ -175,14 +186,18 @@ export function AssistantPage() {
         </p>
       </header>
 
+      <PageTabs tabs={ASSISTANT_TABS} active={section} onSelect={setSection} label="Assistant sections" />
+
       {!providerReady && (
         <InfoBar
           severity="warning"
           title="The assistant needs an AI provider"
-          message="Add an OpenAI-compatible API key under Provider below (or set up AI cleanup in Settings, which it can share)."
+          message="Add an OpenAI-compatible API key under Chat settings › Provider (or set up AI cleanup in Settings, which it can share)."
         />
       )}
 
+      {section === "chat" && (
+        <>
       <div className="assistant-tabs">
         <div className="segmented" role="tablist" aria-label="Assistant view">
           <button type="button" role="tab" aria-selected={tab === "chat"} className={`segmented__item${tab === "chat" ? " segmented__item--selected" : ""}`} onClick={() => setTab("chat")}>
@@ -195,6 +210,12 @@ export function AssistantPage() {
         <span className="assistant-tabs__actions">
           <button type="button" className="text-button" onClick={newChat}>
             <MessageSquarePlus size={14} aria-hidden="true" /> New chat
+          </button>
+          <button type="button" className="text-button" onClick={() => void native.showWhiteboard()} title="A shared board you and Flow can both draw on">
+            <PenLine size={14} aria-hidden="true" /> Whiteboard
+          </button>
+          <button type="button" className="text-button" onClick={() => void native.showPlanner()} title="Your day plan, which Flow can read and change">
+            <CalendarDays size={14} aria-hidden="true" /> Planner
           </button>
           <Button variant="primary" icon={<AudioLines size={15} />} onClick={() => void native.startVoiceAgent()} title="Spoken back-and-forth conversation · Ctrl+Alt+V">
             Talk out loud
@@ -270,7 +291,7 @@ export function AssistantPage() {
             <div className="empty-state">
               <History size={20} aria-hidden="true" />
               <strong>{chats.length === 0 ? "No saved chats yet" : "No chats match"}</strong>
-              <p>{settings.assistantRememberChats ? "Conversations you have with the assistant show up here." : "Turn on “Remember chats” below to keep conversations."}</p>
+              <p>{settings.assistantRememberChats ? "Conversations you have with the assistant show up here." : "Turn on “Remember chats” in Chat settings to keep conversations."}</p>
             </div>
           ) : (
             <div className="saved-chats__list">
@@ -296,139 +317,171 @@ export function AssistantPage() {
           )}
         </section>
       )}
+        </>
+      )}
 
-      <SettingsSection title="Assistant options">
-        <SettingsRow
-          label="Remember chats"
-          description="Saves conversations here and lets the assistant recall them later (“remember that interview I mentioned?”). Stored only on this PC."
-          action={<ToggleSwitch label="Remember chats" checked={settings.assistantRememberChats} onChange={(value) => void update("assistantRememberChats", value)} />}
-        />
-        <SettingsRow
-          label="Allow screen context"
-          description="When off, the assistant can never capture your screen, including from Command Mode."
-          action={<ToggleSwitch label="Allow screen context" checked={settings.assistantAllowScreenContext} onChange={(value) => void update("assistantAllowScreenContext", value)} />}
-        />
-        <SettingsRow
-          label="Let me interrupt the voice agent"
-          description="Talk over it to cut it off. Use headphones: on speakers it would hear itself and reply to its own voice."
-          action={<ToggleSwitch label="Let me interrupt the voice agent" checked={settings.voiceAgentInterruptible} onChange={(value) => void update("voiceAgentInterruptible", value)} />}
-        />
-        <SettingsRow
-          label="Read answers aloud"
-          action={<ToggleSwitch label="Read answers aloud" checked={settings.buddySpeakResponses} onChange={(value) => void update("buddySpeakResponses", value)} />}
-        />
-        <SettingsRow
-          label="Voice"
-          description="Deepgram voice used when answers are read aloud."
-          action={
-            <span className="voice-picker">
-              <select className="settings-combo" aria-label="Assistant voice" value={settings.assistantVoice ?? ""} onChange={(event) => void update("assistantVoice", event.target.value || null)}>
-                {ASSISTANT_VOICES.map((voice, index) => (
-                  <option key={voice.id} value={index === 0 ? "" : voice.id}>
+      {section === "flow" && (
+        <>
+        <SettingsSection title="Personality and voice">
+          <SettingsRow
+            label="Personality"
+            description="How Flow talks to you. It does the same work in every mode. Takes effect on the next conversation."
+            action={
+              <select className="settings-combo" aria-label="Personality" value={settings.voiceAgentPersonality} onChange={(event) => void update("voiceAgentPersonality", event.target.value as AppSettings["voiceAgentPersonality"])}>
+                <option value="friendly">Friendly</option>
+                <option value="smug">Smug (dry, reluctantly brilliant)</option>
+                <option value="professional">Professional</option>
+                <option value="hype">Hype</option>
+                <option value="blunt">Blunt</option>
+                <option value="mentor">Mentor</option>
+              </select>
+            }
+          />
+          <SettingsRow
+            label="About you (flow.md)"
+            description='A note Flow reads at the start of every conversation: your name, how you like answers, people you mention. Say "Flow, remember…" and it adds to it.'
+            action={
+              <Button variant="secondary" onClick={() => void native.openFlowProfile()}>
+                Edit flow.md
+              </Button>
+            }
+          />
+          <SettingsRow
+            label="Voice agent voice"
+            description="Who you hear in a live conversation. Takes effect on the next conversation."
+            action={
+              <select className="settings-combo" aria-label="Voice agent voice" value={settings.voiceAgentVoice} onChange={(event) => void update("voiceAgentVoice", event.target.value)}>
+                {VOICE_AGENT_VOICES.map((voice) => (
+                  <option key={voice.id} value={voice.id}>
                     {voice.label}
                   </option>
                 ))}
               </select>
-              <Button variant="secondary" onClick={() => void speak("Hi! This is how I'll sound when I read answers to you.")}>
-                Preview
-              </Button>
-            </span>
-          }
-        />
-      </SettingsSection>
-
-      <SettingsSection
-        title="Provider"
-        description={credentials.assistant ? "Using the assistant's own provider below." : "No separate key: the assistant uses your AI cleanup provider. Add a key to use a different model (it needs to accept images to see your screen)."}
-      >
-        <SettingsRow
-          label="Endpoint"
-          description="Any OpenAI-compatible API."
-          action={<input className="settings-input" aria-label="Assistant endpoint" value={settings.assistantEndpoint} onChange={(event) => setSettings({ ...settings, assistantEndpoint: event.target.value })} onBlur={() => void update("assistantEndpoint", settings.assistantEndpoint.trim())} />}
-        />
-        <SettingsRow
-          label="Model"
-          action={<input className="settings-input" aria-label="Assistant model" value={settings.assistantModel} onChange={(event) => setSettings({ ...settings, assistantModel: event.target.value })} onBlur={() => void update("assistantModel", settings.assistantModel.trim())} />}
-        />
-        <SettingsRow
-          label="API key"
-          description="Stored in Windows Credential Manager."
-          action={
-            <span className="voice-picker">
-              <span className="settings-row__value">{credentials.assistant ? "Configured" : "Not set"}</span>
-              <Button variant="secondary" onClick={() => setKeyDialog(true)}>
-                {credentials.assistant ? "Replace" : "Add key"}
-              </Button>
-              {credentials.assistant && (
-                <Button variant="secondary" onClick={() => void native.deleteCredential("assistant").then(() => native.credentialStatus().then(setCredentials))}>
-                  Remove
+            }
+          />
+          <SettingsRow
+            label="Expressivity"
+            description="How animated the voice agent sounds."
+            action={
+              <select className="settings-combo" aria-label="Expressivity" value={settings.voiceAgentExpressivity} onChange={(event) => void update("voiceAgentExpressivity", Number(event.target.value))}>
+                <option value={2}>2 (more animated)</option>
+                <option value={1}>1</option>
+                <option value={0}>0 (default)</option>
+                <option value={-1}>-1</option>
+                <option value={-2}>-2 (calmer)</option>
+              </select>
+            }
+          />
+        </SettingsSection>
+        <SettingsSection title="What Flow can do">
+          <SettingsRow
+            label={'Wake up on "Hey Flow"'}
+            description="Start a conversation by saying it. Keeps the microphone open; listening happens on this PC. It uses the microphone chosen in Settings."
+            action={<ToggleSwitch label="Wake up on Hey Flow" checked={settings.wakeWordEnabled} onChange={(value) => void update("wakeWordEnabled", value)} />}
+          />
+          <SettingsRow
+            label="Let me interrupt the voice agent"
+            description="Talk over it to cut it off. Use headphones: on speakers it would hear itself and reply to its own voice."
+            action={<ToggleSwitch label="Let me interrupt the voice agent" checked={settings.voiceAgentInterruptible} onChange={(value) => void update("voiceAgentInterruptible", value)} />}
+          />
+          <SettingsRow
+            label="Let the voice agent open apps and websites"
+            description={'For requests like "open OBS". It can only open things, not change or delete them.'}
+            action={<ToggleSwitch label="Let the voice agent open apps and websites" checked={settings.voiceAgentCanAct} onChange={(value) => void update("voiceAgentCanAct", value)} />}
+          />
+          <SettingsRow
+            label="Web search"
+            description="Lets Flow look things up. Needs a free Tavily key from tavily.com; searches are sent to Tavily."
+            action={
+              <span className="voice-picker">
+                <span className="settings-row__value">{credentials.search ? "Configured" : "Not set"}</span>
+                <Button variant="secondary" onClick={() => setKeyDialog("search")}>
+                  {credentials.search ? "Replace" : "Add key"}
                 </Button>
-              )}
-            </span>
-          }
-        />
-      </SettingsSection>
+                {credentials.search && (
+                  <Button variant="secondary" onClick={() => void native.deleteCredential("search").then(() => native.credentialStatus().then(setCredentials))}>
+                    Remove
+                  </Button>
+                )}
+              </span>
+            }
+          />
+        </SettingsSection>
+        </>
+      )}
 
-      <SettingsSection title="Buddy">
-        <SettingsRow
-          label="Enable Buddy"
-          description="The desktop companion that mirrors dictation state and opens the assistant."
-          action={
-            <ToggleSwitch
-              label="Enable Buddy"
-              checked={settings.buddyEnabled}
-              onChange={async (value) => {
-                await update("buddyEnabled", value);
-                await native.applyBuddySettings();
-              }}
-            />
-          }
-        />
-        <SettingsRow
-          label="Show Buddy when VoiceFlow starts"
-          action={
-            <ToggleSwitch
-              label="Show Buddy when VoiceFlow starts"
-              checked={settings.buddyShowAtStartup}
-              onChange={(value) => void update("buddyShowAtStartup", value)}
-            />
-          }
-        />
-        <SettingsRow
-          label="Buddy size"
-          action={
-            <select
-              className="settings-combo"
-              aria-label="Buddy size"
-              value={settings.buddySize}
-              onChange={async (event) => {
-                await update("buddySize", event.target.value as AppSettings["buddySize"]);
-                await native.applyBuddySettings();
-              }}
-            >
-              <option value="small">Small</option>
-              <option value="medium">Medium</option>
-              <option value="large">Large</option>
-            </select>
-          }
-        />
-        <SettingsRow
-          label="Keep above other windows"
-          action={
-            <ToggleSwitch
-              label="Keep above other windows"
-              checked={settings.buddyAlwaysOnTop}
-              onChange={async (value) => {
-                await update("buddyAlwaysOnTop", value);
-                await native.applyBuddySettings();
-              }}
-            />
-          }
-        />
-      </SettingsSection>
+      {section === "settings" && (
+        <>
+        <SettingsSection title="Chat">
+          <SettingsRow
+            label="Remember chats"
+            description="Saves conversations here and lets the assistant recall them later (“remember that interview I mentioned?”). Stored only on this PC."
+            action={<ToggleSwitch label="Remember chats" checked={settings.assistantRememberChats} onChange={(value) => void update("assistantRememberChats", value)} />}
+          />
+          <SettingsRow
+            label="Allow screen context"
+            description="When off, the assistant can never capture your screen, including from Command Mode."
+            action={<ToggleSwitch label="Allow screen context" checked={settings.assistantAllowScreenContext} onChange={(value) => void update("assistantAllowScreenContext", value)} />}
+          />
+          <SettingsRow
+            label="Read answers aloud"
+            action={<ToggleSwitch label="Read answers aloud" checked={settings.buddySpeakResponses} onChange={(value) => void update("buddySpeakResponses", value)} />}
+          />
+          <SettingsRow
+            label="Voice"
+            description="Deepgram voice used when answers are read aloud."
+            action={
+              <span className="voice-picker">
+                <select className="settings-combo" aria-label="Assistant voice" value={settings.assistantVoice ?? ""} onChange={(event) => void update("assistantVoice", event.target.value || null)}>
+                  {ASSISTANT_VOICES.map((voice, index) => (
+                    <option key={voice.id} value={index === 0 ? "" : voice.id}>
+                      {voice.label}
+                    </option>
+                  ))}
+                </select>
+                <Button variant="secondary" onClick={() => void speak("Hi! This is how I'll sound when I read answers to you.")}>
+                  Preview
+                </Button>
+              </span>
+            }
+          />
+        </SettingsSection>
+        <SettingsSection
+          title="Provider"
+          description={credentials.assistant ? "Using the assistant's own provider below." : "No separate key: the assistant uses your AI cleanup provider. Add a key to use a different model (it needs to accept images to see your screen)."}
+        >
+          <SettingsRow
+            label="Endpoint"
+            description="Any OpenAI-compatible API."
+            action={<input className="settings-input" aria-label="Assistant endpoint" value={settings.assistantEndpoint} onChange={(event) => setSettings({ ...settings, assistantEndpoint: event.target.value })} onBlur={() => void update("assistantEndpoint", settings.assistantEndpoint.trim())} />}
+          />
+          <SettingsRow
+            label="Model"
+            action={<input className="settings-input" aria-label="Assistant model" value={settings.assistantModel} onChange={(event) => setSettings({ ...settings, assistantModel: event.target.value })} onBlur={() => void update("assistantModel", settings.assistantModel.trim())} />}
+          />
+          <SettingsRow
+            label="API key"
+            description="Stored in Windows Credential Manager."
+            action={
+              <span className="voice-picker">
+                <span className="settings-row__value">{credentials.assistant ? "Configured" : "Not set"}</span>
+                <Button variant="secondary" onClick={() => setKeyDialog("assistant")}>
+                  {credentials.assistant ? "Replace" : "Add key"}
+                </Button>
+                {credentials.assistant && (
+                  <Button variant="secondary" onClick={() => void native.deleteCredential("assistant").then(() => native.credentialStatus().then(setCredentials))}>
+                    Remove
+                  </Button>
+                )}
+              </span>
+            }
+          />
+        </SettingsSection>
+        </>
+      )}
 
-      <ContentDialog open={keyDialog} title="Assistant API key" primaryText="Save" primaryDisabled={!secret.trim()} onPrimary={() => void storeKey()} onClose={() => { setKeyDialog(false); setSecret(""); }}>
-        <p>Used only for the assistant. It is never shown again after saving.</p>
+      <ContentDialog open={keyDialog !== null} title={keyDialog === "search" ? "Web search key" : "Assistant API key"} primaryText="Save" primaryDisabled={!secret.trim()} onPrimary={() => void storeKey()} onClose={() => { setKeyDialog(null); setSecret(""); }}>
+        <p>{keyDialog === "search" ? "Your Tavily API key, from tavily.com. It lets Flow search the web." : "Used only for the assistant."} It is never shown again after saving.</p>
         <input className="settings-input dictionary-quick-add" type="password" aria-label="API key" value={secret} onChange={(event) => setSecret(event.target.value)} />
       </ContentDialog>
     </div>

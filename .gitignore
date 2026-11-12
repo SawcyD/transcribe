@@ -27,3 +27,6 @@ src-tauri/target
 *.njsproj
 *.sln
 *.sw?
+
+# Spoken clips the wake word test needs
+!src-tauri/tests/fixtures/*.wav

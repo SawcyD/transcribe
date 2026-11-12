@@ -4,6 +4,38 @@ Each `## vX.Y.Z` section is published as that version's GitHub release notes
 and shown in VoiceFlow's "Update available" dialog, so write it for users:
 what changed for them, not how it was built.
 
+## v2.0.0
+
+**Meet Flow.** VoiceFlow's voice assistant now has a name, a face and a lot more it can do. Say **"Hey Flow"** (or press **Ctrl+Alt+V**) and a glowing orb rises from the taskbar to talk with you.
+
+### New
+- **The orb:** it swells with whoever is talking, shifts colour with the mood of the conversation, and sits wherever you drag it.
+- **"Hey Flow":** start a conversation hands-free. Listening for the phrase happens on your PC, on the microphone you chose in Settings. Turn it on under Assistant › Flow voice agent.
+- **Personalities:** Friendly, Smug, Professional, Hype, Blunt or Mentor. Same help, different attitude.
+- **36 new voices** and an expressivity setting, from calm to animated.
+- **flow.md:** tell Flow about yourself once, and say "Flow, remember…" to add to it.
+- **Whiteboard:** a shared board you and Flow can both draw on. Flow sketches flowcharts and notes a piece at a time while it explains, reads what you drew, can add pictures from the web, and boards are saved by name.
+- **Planner:** a glass day planner with a timeline and the order your tasks depend on. Ask "what's my plan for today?", "add study for my exam to tomorrow morning" or "push my 3 PM task to tomorrow".
+- **Type or paste to Flow** during a conversation, including screenshots and images.
+- **Web search:** with a free Tavily key, Flow looks things up and can put what it finds on the whiteboard with links.
+- **Mock interviews:** ask Flow to interview you, behavioural or technical. It can look at your code when you're done.
+- **Flow can see your screen** when you ask, and **open apps and websites** ("open OBS"). It can't close, change or delete anything.
+- **Numbers as digits** in dictation ("nine hundred" becomes "900").
+- **Say goodbye to hang up:** Flow ends the call when you're done.
+
+### Better
+- Flow ignores claps, snaps and other short sounds.
+- The Assistant page is split into Chat, Flow voice agent and Chat settings.
+- Smoother animations across the dock.
+
+### Fixed
+- Dictation failing with "Transcription failed" after the voice-activity update.
+- Dialogs losing focus while you typed in them.
+- Voice conversations saved one line at a time in your chats.
+
+### Removed
+- Buddy, the desktop companion. Flow takes its place.
+
 ## v1.2.0
 
 **Talk to your assistant, out loud.** Press **Ctrl+Alt+V** for a spoken back-and-forth conversation. A purple dock shows the assistant talking above your own, and conversations are saved so it can remember them later.

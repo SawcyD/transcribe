@@ -5,6 +5,8 @@ pub enum CredentialKind {
     Deepgram,
     Cleanup,
     Assistant,
+    /// Tavily, for the voice agent's web search.
+    Search,
 }
 
 impl CredentialKind {
@@ -13,6 +15,7 @@ impl CredentialKind {
             "deepgram" => Ok(Self::Deepgram),
             "cleanup" => Ok(Self::Cleanup),
             "assistant" => Ok(Self::Assistant),
+            "search" => Ok(Self::Search),
             _ => Err(AppError::Configuration(
                 "unknown credential provider".into(),
             )),
@@ -23,6 +26,7 @@ impl CredentialKind {
             Self::Deepgram => "deepgram-api-key",
             Self::Cleanup => "cleanup-api-key",
             Self::Assistant => "assistant-api-key",
+            Self::Search => "search-api-key",
         }
     }
 }

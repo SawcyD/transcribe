@@ -116,6 +116,7 @@ mod tests {
             interim_results: true,
             punctuation: true,
             smart_formatting: true,
+            numerals: false,
             dictionary_keyterms: vec![],
             developer_mode: false,
             endpointing_ms: 300,

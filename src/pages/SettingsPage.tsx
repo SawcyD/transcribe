@@ -37,7 +37,7 @@ const SETTINGS_TABS = [
 export function SettingsPage() {
   const [tab, setTab] = usePageTab(SETTINGS_TABS);
   const [settings, setSettings] = useState<AppSettings>(defaultSettings);
-  const [credentials, setCredentials] = useState<CredentialStatus>({ deepgram: false, cleanup: false, assistant: false });
+  const [credentials, setCredentials] = useState<CredentialStatus>({ deepgram: false, cleanup: false, assistant: false, search: false });
   const [launchOnStartup, setLaunchOnStartup] = useState(false);
   const [credentialDialog, setCredentialDialog] = useState<"deepgram" | "cleanup" | null>(null);
   const [secret, setSecret] = useState("");
