@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "VoiceFlow Dev",
-  "version": "1.2.0",
+  "version": "2.0.0",
   "identifier": "dev.voiceflow.desktop",
   "build": {
     "frontendDist": "../dist",
@@ -86,6 +86,20 @@
         "minWidth": 640,
         "minHeight": 420,
         "center": true,
+        "visible": false
+      },
+      {
+        "label": "planner",
+        "title": "VoiceFlow Planner",
+        "url": "index.html#/planner",
+        "width": 600,
+        "height": 470,
+        "resizable": false,
+        "decorations": false,
+        "transparent": true,
+        "shadow": false,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
         "visible": false
       }
     ],

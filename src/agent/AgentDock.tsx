@@ -77,7 +77,7 @@ export function AgentDock() {
         <div ref={orb} className={`agent-orb agent-orb--${state} agent-orb--mood-${mood}`} data-tauri-drag-region aria-hidden="true" />
       </div>
       {composing ? (
-        <AgentComposer onClose={() => setComposing(false)} />
+        <AgentComposer onClose={() => setComposing(false)} caption={showLine ? line.content : label} speaker={speaker} />
       ) : (
         <div className="agent-caption" data-tauri-drag-region role="status" aria-live="polite">
           <span className={`agent-caption__dot agent-caption__dot--${speaker}`} aria-hidden="true" />

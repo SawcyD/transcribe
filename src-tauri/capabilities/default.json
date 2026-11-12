@@ -2,7 +2,7 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
   "description": "enables the default permissions",
-  "windows": ["main", "overlay", "assistant", "agent", "whiteboard"],
+  "windows": ["main", "overlay", "assistant", "agent", "whiteboard", "planner"],
   "permissions": [
     "core:default",
     "core:window:allow-show",

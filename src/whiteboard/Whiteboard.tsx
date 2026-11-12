@@ -19,8 +19,16 @@ const VALID_NAME = /^[\p{L}\p{N} _-]{1,60}$/u;
 type Elements = ReturnType<typeof convertToExcalidrawElements>;
 type Skeletons = Parameters<typeof convertToExcalidrawElements>[0];
 
-/** Adds elements, optionally moved to the free space right of what's there. Returns how many. */
-function place(api: ExcalidrawImperativeAPI, fresh: Elements, intoFreeSpace: boolean): number {
+/** The whole reveal takes at most this long, however many shapes there are. */
+const REVEAL_MS = 2_400;
+const sleep = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms));
+
+/**
+ * Adds elements, optionally moved to the free space right of what's there,
+ * revealing them a shape at a time (each with its label) so the drawing
+ * builds up while Flow talks instead of popping in all at once. Returns how many.
+ */
+async function place(api: ExcalidrawImperativeAPI, fresh: Elements, intoFreeSpace: boolean): Promise<number> {
   if (fresh.length === 0) throw new Error("there was nothing to draw");
   const existing = api.getSceneElements();
   let placed = fresh;
@@ -29,9 +37,40 @@ function place(api: ExcalidrawImperativeAPI, fresh: Elements, intoFreeSpace: boo
     const shiftY = Math.min(...existing.map((element) => element.y)) - Math.min(...fresh.map((element) => element.y));
     placed = fresh.map((element) => ({ ...element, x: element.x + shiftX, y: element.y + shiftY })) as Elements;
   }
-  api.updateScene({ elements: [...existing, ...placed] });
+  // Frame the finished drawing first, so the view doesn't jump as it grows.
   api.scrollToContent(placed, { fitToContent: true, animate: true });
+  // Arrows and lines last, once the shapes they connect are there.
+  const isConnector = (element: Elements[number]) => element.type === "arrow" || element.type === "line";
+  const labelsOf = (id: string) => placed.filter((element) => element.type === "text" && element.containerId === id);
+  const groups = [...placed.filter((element) => !isConnector(element)), ...placed.filter(isConnector)]
+    .filter((element) => !(element.type === "text" && element.containerId))
+    .map((element) => [element, ...labelsOf(element.id)]);
+  const step = Math.min(160, REVEAL_MS / groups.length);
+  for (const group of groups) {
+    // Read the scene each time, so the user's own edits meanwhile are kept.
+    api.updateScene({ elements: [...api.getSceneElements(), ...group] });
+    await sleep(step);
+  }
   return placed.length;
+}
+
+/** Puts an image (fetched by the app) on the board, at most 420 px wide. */
+async function addImage(api: ExcalidrawImperativeAPI, args: { dataURL: string; mimeType: string; link?: string; x?: number; y?: number; width?: number }): Promise<string> {
+  const size = await new Promise<{ width: number; height: number }>((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve({ width: image.naturalWidth, height: image.naturalHeight });
+    image.onerror = () => reject(new Error("the image could not be decoded"));
+    image.src = args.dataURL;
+  });
+  const width = Math.min(Number(args.width) || 420, size.width, 800);
+  const fileId = crypto.randomUUID();
+  api.addFiles([{ id: fileId as never, dataURL: args.dataURL as never, mimeType: args.mimeType as never, created: Date.now() }]);
+  const [element] = convertToExcalidrawElements(
+    [{ type: "image", fileId: fileId as never, x: Number(args.x) || 0, y: Number(args.y) || 0, width, height: Math.round((width * size.height) / size.width), ...(args.link ? { link: args.link } : {}) }] as Skeletons,
+    { regenerateIds: false },
+  );
+  await place(api, [{ ...element, status: "saved" }] as Elements, args.x === undefined);
+  return `Added the image${args.link ? `, linked to ${args.link}` : ""}.`;
 }
 
 /** What Flow gets back from `read_whiteboard`: the board as a compact list. */
@@ -59,14 +98,16 @@ async function handle(api: ExcalidrawImperativeAPI, action: string, rawArguments
     case "mermaid": {
       const { elements: skeleton, files } = await parseMermaidToExcalidraw(String(args.mermaid ?? ""));
       if (files) api.addFiles(Object.values(files));
-      return `Drew a diagram with ${place(api, convertToExcalidrawElements(skeleton), true)} elements.`;
+      return `Drew a diagram with ${await place(api, convertToExcalidrawElements(skeleton), true)} elements.`;
     }
     case "add": {
       if (!Array.isArray(args.elements) || args.elements.length === 0) throw new Error("elements must be a non-empty array");
       // Flow's own ids are kept so it can connect arrows and erase things later.
       const fresh = convertToExcalidrawElements(args.elements as Skeletons, { regenerateIds: false });
-      return `Added ${place(api, fresh, args.position !== "as_given")} elements.`;
+      return `Added ${await place(api, fresh, args.position !== "as_given")} elements.`;
     }
+    case "image":
+      return addImage(api, args);
     case "read":
       return describe(api);
     case "erase": {

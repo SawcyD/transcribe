@@ -1,4 +1,4 @@
-import { AudioLines, History, PenLine, MessageSquarePlus, Monitor, Send, Trash2, X } from "lucide-react";
+import { AudioLines, CalendarDays, History, PenLine, MessageSquarePlus, Monitor, Send, Trash2, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "../components/common/Button";
 import { PageTabs } from "../components/common/PageTabs";
@@ -213,6 +213,9 @@ export function AssistantPage() {
           </button>
           <button type="button" className="text-button" onClick={() => void native.showWhiteboard()} title="A shared board you and Flow can both draw on">
             <PenLine size={14} aria-hidden="true" /> Whiteboard
+          </button>
+          <button type="button" className="text-button" onClick={() => void native.showPlanner()} title="Your day plan, which Flow can read and change">
+            <CalendarDays size={14} aria-hidden="true" /> Planner
           </button>
           <Button variant="primary" icon={<AudioLines size={15} />} onClick={() => void native.startVoiceAgent()} title="Spoken back-and-forth conversation · Ctrl+Alt+V">
             Talk out loud

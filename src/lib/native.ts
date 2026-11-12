@@ -19,6 +19,19 @@ import type {
   AssistantChatTurn,
 } from "../types/models";
 
+/** A day-planner task (see planner.rs). */
+export interface PlannerTask {
+  id: string;
+  title: string;
+  /** YYYY-MM-DD */
+  day: string;
+  /** HH:MM, or null for any time that day */
+  time: string | null;
+  done: boolean;
+  /** Id of the task this one comes after */
+  after: string | null;
+}
+
 export type AgentState = "connecting" | "listening" | "thinking" | "speaking" | "ended" | "error";
 
 export const isTauri = (): boolean => "__TAURI_INTERNALS__" in window;
@@ -155,6 +168,10 @@ export const native = {
   showHistory: () => call<void>("show_history"),
   showWhiteboard: () => call<void>("show_whiteboard"),
   openFlowProfile: () => call<void>("open_flow_profile"),
+  plannerTasks: () => call<PlannerTask[]>("planner_tasks", undefined, []),
+  plannerSaveTask: (task: PlannerTask) => call<PlannerTask>("planner_save_task", { task }),
+  plannerRemoveTask: (id: string) => call<void>("planner_remove_task", { id }),
+  showPlanner: () => call<void>("show_planner", { day: null }),
   listWhiteboards: () => call<string[]>("list_whiteboards", undefined, []),
   loadWhiteboard: (name: string) => call<string | null>("load_whiteboard", { name }, null),
   saveWhiteboard: (name: string, content: string) => call<void>("save_whiteboard", { name, content }),
@@ -234,6 +251,10 @@ export const events = {
     isTauri()
       ? listen<{ id: string; action: string; arguments: string }>("whiteboard-request", ({ payload }) => handler(payload))
       : Promise.resolve(() => undefined),
+  plannerChanged: (handler: () => void): Promise<UnlistenFn> =>
+    isTauri() ? listen("planner-changed", () => handler()) : Promise.resolve(() => undefined),
+  plannerShowDay: (handler: (day: string) => void): Promise<UnlistenFn> =>
+    isTauri() ? listen<string>("planner-show-day", ({ payload }) => handler(payload)) : Promise.resolve(() => undefined),
   assistantPlacement: (handler: (value: "above" | "below") => void): Promise<UnlistenFn> =>
     isTauri() ? listen<"above" | "below">("assistant-placement", ({ payload }) => handler(payload)) : Promise.resolve(() => undefined),
 };

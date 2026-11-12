@@ -424,6 +424,26 @@ pub fn open_flow_profile(app: AppHandle) -> Result<(), AppError> {
 }
 
 #[tauri::command]
+pub fn planner_tasks(app: AppHandle) -> Result<Vec<crate::planner::Task>, AppError> {
+    crate::planner::all(&app)
+}
+
+#[tauri::command]
+pub fn planner_save_task(app: AppHandle, task: crate::planner::Task) -> Result<crate::planner::Task, AppError> {
+    crate::planner::save(&app, task)
+}
+
+#[tauri::command]
+pub fn planner_remove_task(app: AppHandle, id: String) -> Result<(), AppError> {
+    crate::planner::remove(&app, &id)
+}
+
+#[tauri::command]
+pub fn show_planner(app: AppHandle, day: Option<String>) -> Result<(), AppError> {
+    crate::planner::show(&app, &day.unwrap_or_else(crate::planner::today))
+}
+
+#[tauri::command]
 pub fn list_whiteboards(app: AppHandle) -> Result<Vec<String>, AppError> {
     let folder = whiteboard_path(&app, "x")?.parent().map(std::path::Path::to_path_buf).unwrap_or_default();
     let mut names: Vec<String> = std::fs::read_dir(folder)

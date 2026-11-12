@@ -82,7 +82,7 @@ pub async fn search_web(query: &str) -> String {
     let Ok(Ok(key)) = tokio::task::spawn_blocking(|| security::get(CredentialKind::Search)).await else {
         return "Web search isn't set up. The user can add a Tavily key in the Assistant settings.".into();
     };
-    let body = serde_json::json!({ "query": query, "search_depth": "basic", "max_results": 5, "include_answer": true });
+    let body = serde_json::json!({ "query": query, "search_depth": "basic", "max_results": 5, "include_answer": true, "include_images": true });
     let response = reqwest::Client::new()
         .post("https://api.tavily.com/search")
         .bearer_auth(key)
@@ -107,11 +107,47 @@ pub async fn search_web(query: &str) -> String {
             result["url"].as_str().unwrap_or_default()
         ));
     }
+    let images: Vec<&str> = found["images"].as_array().into_iter().flatten().filter_map(|image| image.as_str()).take(3).collect();
+    if !images.is_empty() {
+        text.push_str(&format!("Images (for add_image_to_whiteboard): {}
+", images.join(" ")));
+    }
     if text.is_empty() {
         "The search found nothing.".into()
     } else {
         text
     }
+}
+
+/// Downloads an image from the web as a data: URL, for the whiteboard (the
+/// board itself may only load images the app hands it).
+pub async fn fetch_image(url: &str) -> Result<(String, String), String> {
+    use base64::Engine;
+    if !url.starts_with("https://") {
+        return Err("only https:// image addresses can be used".into());
+    }
+    let response = reqwest::Client::new()
+        .get(url)
+        .timeout(std::time::Duration::from_secs(10))
+        .send()
+        .await
+        .and_then(|response| response.error_for_status())
+        .map_err(|error| format!("couldn't download it: {}", error.without_url()))?;
+    let mime = response
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .map(|value| value.split(';').next().unwrap_or_default().trim().to_owned())
+        .unwrap_or_default();
+    if !matches!(mime.as_str(), "image/png" | "image/jpeg" | "image/gif" | "image/webp" | "image/svg+xml") {
+        return Err(format!("that address isn't a supported image ({})", if mime.is_empty() { "unknown type" } else { &mime }));
+    }
+    let bytes = response.bytes().await.map_err(|error| error.to_string())?;
+    if bytes.len() > 5_000_000 {
+        return Err("the image is larger than 5 MB".into());
+    }
+    let encoded = base64::engine::general_purpose::STANDARD.encode(&bytes);
+    Ok((format!("data:{mime};base64,{encoded}"), mime))
 }
 
 #[cfg(test)]

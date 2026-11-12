@@ -15,6 +15,7 @@ mod tts;
 mod voice_agent;
 mod launcher;
 mod personality;
+mod planner;
 mod profile;
 mod wake_word;
 mod insertion;
@@ -243,9 +244,9 @@ pub fn run() {
             Ok(())
         })
         .on_window_event(|window, event| {
-            // The whiteboard hides instead of closing, so Flow can reopen it
-            // and nothing drawn is lost.
-            if window.label() == "whiteboard" {
+            // The whiteboard and planner hide instead of closing, so Flow can
+            // reopen them and nothing is lost.
+            if matches!(window.label(), "whiteboard" | "planner") {
                 if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                     api.prevent_close();
                     let _ = window.hide();
@@ -313,6 +314,10 @@ pub fn run() {
             commands::load_whiteboard,
             commands::save_whiteboard,
             commands::open_flow_profile,
+            commands::planner_tasks,
+            commands::planner_save_task,
+            commands::planner_remove_task,
+            commands::show_planner,
             commands::open_data_folder,
             commands::diagnostic_report,
             commands::clear_history,

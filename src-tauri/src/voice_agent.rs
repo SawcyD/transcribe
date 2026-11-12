@@ -559,7 +559,62 @@ async fn run_tool(app: &AppHandle, settings: &crate::models::AppSettings, name: 
         "erase_from_whiteboard" => crate::commands::ask_whiteboard(app, "erase", raw).await,
         "clear_whiteboard" => crate::commands::ask_whiteboard(app, "clear", raw).await,
         "search_web" => crate::launcher::search_web(&argument("query")).await,
+        "add_image_to_whiteboard" => match crate::launcher::fetch_image(&argument("url")).await {
+            Ok((data_url, mime)) => {
+                let source = Some(argument("source")).filter(|source| source.starts_with("http")).unwrap_or_else(|| argument("url"));
+                let request = serde_json::json!({ "dataURL": data_url, "mimeType": mime, "link": source, "width": arguments["width"] });
+                crate::commands::ask_whiteboard(app, "image", &request.to_string()).await
+            }
+            Err(error) => format!("Couldn't add that image: {error}"),
+        },
         "remember" => crate::profile::remember(app, &argument("fact")),
+        "show_plan" => {
+            let day = Some(argument("day")).filter(|day| !day.is_empty()).unwrap_or_else(crate::planner::today);
+            let _ = crate::planner::show(app, &day);
+            match crate::planner::all(app) {
+                Ok(tasks) => crate::planner::describe_day(&tasks, &day),
+                Err(error) => format!("Couldn't read the plan: {error}"),
+            }
+        }
+        "save_task" => {
+            let id = argument("id");
+            let existing = crate::planner::all(app).ok().and_then(|tasks| tasks.into_iter().find(|task| !id.is_empty() && task.id == id));
+            let given = |key: &str| arguments.get(key).filter(|value| !value.is_null());
+            let base = existing.unwrap_or(crate::planner::Task {
+                id: String::new(),
+                title: String::new(),
+                day: crate::planner::today(),
+                time: None,
+                done: false,
+                after: None,
+            });
+            let task = crate::planner::Task {
+                id: base.id,
+                title: given("title").and_then(|value| value.as_str()).map(str::to_owned).unwrap_or(base.title),
+                day: given("day").and_then(|value| value.as_str()).filter(|day| !day.is_empty()).map(str::to_owned).unwrap_or(base.day),
+                // An empty time clears it ("move it to any time").
+                time: match given("time").and_then(|value| value.as_str()) {
+                    Some(time) => Some(time.to_owned()),
+                    None => base.time,
+                },
+                done: given("done").and_then(serde_json::Value::as_bool).unwrap_or(base.done),
+                after: match given("after").and_then(|value| value.as_str()) {
+                    Some(after) => Some(after.to_owned()),
+                    None => base.after,
+                },
+            };
+            match crate::planner::save(app, task) {
+                Ok(saved) => {
+                    let _ = crate::planner::show(app, &saved.day);
+                    format!("Saved [{}] {} on {}{}.", saved.id, saved.title, saved.day, saved.time.map(|time| format!(" at {time}")).unwrap_or_default())
+                }
+                Err(error) => format!("Couldn't save the task: {error}"),
+            }
+        }
+        "remove_task" => match crate::planner::remove(app, &argument("id")) {
+            Ok(()) => "Removed it from the plan.".into(),
+            Err(error) => format!("Couldn't remove it: {error}"),
+        },
         _ => "That tool is not available.".into(),
     }
 }
@@ -594,10 +649,17 @@ If the user asks for a mock interview, interview prep or interview mode, become 
     if can_act {
         prompt.push_str("\n\nYou can open apps on the user's computer with open_app and web pages with open_website. Use them when asked, then confirm in a few words. You cannot do anything else on the computer, so say so if asked.");
     }
-    prompt.push_str("\n\nYou share a whiteboard with the user and can use all of it. For flowcharts use draw_on_whiteboard with Mermaid flowchart code: short plain labels, no quotes or brackets inside a label. For everything else use add_to_whiteboard: shapes, text, arrows, lines, frames and web embeds, in any colour, size and stroke. To write an explanation, add a rectangle with a label so the text wraps, and give it a soft background colour. Call read_whiteboard first when you need to know what is there, to place something next to the user's work, or to get ids for erase_from_whiteboard. read_whiteboard cannot see inside freehand drawings or pasted images; look at the screen for those if you can. After drawing, say in one sentence what you added. If a drawing is rejected, simplify it and try once more.");
+    prompt.push_str("\n\nYou share a whiteboard with the user and can use all of it. For flowcharts use draw_on_whiteboard with Mermaid flowchart code: short plain labels, no quotes or brackets inside a label. For everything else use add_to_whiteboard: shapes, text, arrows, lines, frames and web embeds, in any colour, size and stroke. To write an explanation, add a rectangle with a label so the text wraps, and give it a soft background colour. Call read_whiteboard first when you need to know what is there, to place something next to the user's work, or to get ids for erase_from_whiteboard. read_whiteboard cannot see inside freehand drawings or pasted images; look at the screen for those if you can. After drawing, say in one sentence what you added. If a drawing is rejected, simplify it and try once more. Drawings appear a piece at a time, so you can talk through them as they build. To put a picture on the board, such as a logo or diagram, use add_image_to_whiteboard with a direct image address; search results list some.");
     if can_search {
         prompt.push_str("\n\nYou can search the web with search_web. Use it for current facts and best practices, then say what you found in a sentence or two. When the user is planning on the whiteboard, also add the key points there, each with its source link.");
     }
+    let now = chrono::Local::now();
+    prompt.push_str(&format!(
+        "\n\nToday is {} ({}), and it is {}. You keep the user's day plan with show_plan, save_task and remove_task. When they ask what's on their plan, call show_plan and read out the next couple of things still to do, not the whole list. Work out dates yourself (tomorrow, next Monday) as YYYY-MM-DD. When moving a task to another day, keep its id. Link tasks with after when one must happen before another. When asked to push tasks, move them to the next weekday unless they say otherwise.",
+        now.format("%A, %B %-d, %Y"),
+        now.format("%Y-%m-%d"),
+        now.format("%-I:%M %p")
+    ));
     prompt.push_str("\n\nWhen the user asks you to remember something about them, or tells you a lasting preference, save it with remember so you know it next time. Keep each one to a short sentence.");
     for section in [profile, memory].into_iter().flatten() {
         prompt.push_str("\n\n");
@@ -661,6 +723,27 @@ If the user asks for a mock interview, interview prep or interview mode, become 
         "description": "Hang up. Use when the user says goodbye or clearly wants to stop, for example \"bye\", \"that's all\", \"thanks, I'm done\" or \"talk later\". Not when they only pause or thank you mid-conversation.",
         "parameters": { "type": "object", "properties": {} }
     }));
+    tools.push(serde_json::json!({
+        "name": "show_plan",
+        "description": "Open the planner on a day and get that day's tasks with their ids, times and order.",
+        "parameters": { "type": "object", "properties": { "day": { "type": "string", "description": "YYYY-MM-DD, default today" } } }
+    }));
+    tools.push(serde_json::json!({
+        "name": "save_task",
+        "description": "Add a task to the plan, or change one (pass its id): rename it, move it to another day or time, mark it done, or set the task it comes after.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "id": { "type": "string", "description": "Leave out to add a new task" },
+                "title": { "type": "string" },
+                "day": { "type": "string", "description": "YYYY-MM-DD" },
+                "time": { "type": "string", "description": "24-hour HH:MM, or empty for any time that day" },
+                "done": { "type": "boolean" },
+                "after": { "type": "string", "description": "Id of the task this one comes after, for the flow chart" }
+            }
+        }
+    }));
+    tools.push(tool("remove_task", "Take a task off the plan. Only when the user asks to remove or cancel it.", "id", "The task's id"));
     tools.push(tool("remember", "Save a short fact or preference about the user to their flow.md profile, so you know it in future conversations.", "fact", "One sentence, for example: Prefers TypeScript and Rust for code"));
     tools.push(serde_json::json!({
         "name": "read_whiteboard",
@@ -680,6 +763,19 @@ If the user asks for a mock interview, interview prep or interview mode, become 
         "name": "clear_whiteboard",
         "description": "Erase everything on the whiteboard. Only when the user asks.",
         "parameters": { "type": "object", "properties": {} }
+    }));
+    tools.push(serde_json::json!({
+        "name": "add_image_to_whiteboard",
+        "description": "Download an image from the web and put it on the whiteboard, linked to its source.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "url": { "type": "string", "description": "Direct https address of the image file" },
+                "source": { "type": "string", "description": "The page the image came from, for the link" },
+                "width": { "type": "number", "description": "Display width in pixels, default 420" }
+            },
+            "required": ["url"]
+        }
     }));
     if can_search {
         tools.push(tool("search_web", "Search the web. Returns a short summary and the top results with their links.", "query", "What to search for"));
@@ -809,7 +905,7 @@ mod tests {
         assert_eq!(settings["agent"]["think"]["functions"][1]["parameters"]["required"][0], "name");
         // With screen and actions off, only the whiteboard tools are offered.
         let functions = &agent_settings(&setup("flux-kit-en"))["agent"]["think"]["functions"];
-        assert_eq!(functions.as_array().map(Vec::len), Some(7));
+        assert_eq!(functions.as_array().map(Vec::len), Some(11));
         assert!(!functions.to_string().contains("search_web"));
         assert!(settings["agent"]["think"]["functions"].to_string().contains("search_web"));
         assert_eq!(functions[0]["name"], "draw_on_whiteboard");

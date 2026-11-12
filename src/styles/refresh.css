@@ -361,11 +361,16 @@ html:has(.agent-dock), html:has(.agent-dock) body, html:has(.agent-dock) #root {
 .agent-caption__button:active { transform: scale(.92); }
 /* Type-or-paste box: the caption pill grown into a small composer. The orb
    shrinks to make room, on the same spring the orb uses everywhere else. */
-.agent-orb-wrap { transition: transform 420ms cubic-bezier(.3, 1.4, .5, 1); }
-.agent-dock--composing .agent-orb-wrap { transform: translateY(10px) scale(.62); }
+.agent-orb-wrap { transition: transform 420ms cubic-bezier(.3, 1.4, .5, 1), margin 420ms cubic-bezier(.3, 1.4, .5, 1); }
+/* Shrinks to half size and gives back the space it no longer needs. */
+.agent-dock--composing .agent-orb-wrap { margin: -23px 0; transform: scale(.5); }
 .agent-composer { display: grid; gap: 6px; width: 340px; padding: 6px; border-radius: 22px; background: color-mix(in srgb, var(--memora-acrylic, #1f1f24) 70%, rgb(14 16 20 / .94)); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--you) 40%, transparent), 0 0 18px color-mix(in srgb, var(--you) 14%, transparent); backdrop-filter: blur(28px); transform-origin: bottom center; }
 .agent-composer__row { display: flex; align-items: flex-end; gap: 6px; }
-.agent-composer textarea { flex: 1 1 auto; min-width: 0; height: 30px; max-height: 76px; padding: 6px 4px; color: var(--ink); font: inherit; font-size: 12.5px; line-height: 18px; background: transparent; border: 0; outline: none; resize: none; }
+.agent-composer__caption { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 2px 2px 4px 10px; color: var(--muted, var(--ink)); font-size: 12px; border-bottom: 1px solid color-mix(in srgb, var(--ink) 8%, transparent); }
+.agent-composer__caption .agent-caption__line { flex: 1 1 auto; min-width: 0; opacity: .85; }
+.agent-composer__close { display: grid; flex: 0 0 auto; place-items: center; width: 22px; height: 22px; padding: 0; color: var(--ink); background: transparent; border: 0; border-radius: 50%; cursor: pointer; transition: background-color 120ms; }
+.agent-composer__close:hover { background: color-mix(in srgb, var(--ink) 12%, transparent); }
+.agent-composer textarea { flex: 1 1 auto; min-width: 0; height: 30px; max-height: 58px; padding: 6px 4px; color: var(--ink); font: inherit; font-size: 12.5px; line-height: 18px; background: transparent; border: 0; outline: none; resize: none; }
 .agent-composer textarea::placeholder { color: var(--faint); }
 /* The whole box shows focus instead of a ring around the bare text field. */
 .agent-composer textarea:focus-visible { outline: none; }
@@ -436,3 +441,62 @@ html:has(.agent-dock), html:has(.agent-dock) body, html:has(.agent-dock) #root {
 .whiteboard-boards input { width: 200px; }
 .whiteboard-boards button { cursor: pointer; }
 .whiteboard-boards button:hover { background: var(--button-hover-bg, var(--island-bg-color)); }
+
+/* --- Planner: a dark glass card, timeline left and task order right --- */
+html:has(.planner), html:has(.planner) body, html:has(.planner) #root { min-width: 0; min-height: 0; height: 100%; background: transparent; overflow: hidden; }
+.planner { --you: #7cc0f5; --assistant: #a78bfa; display: flex; flex-direction: column; height: calc(100vh - 20px); margin: 10px; overflow: hidden; color: var(--ink); background: linear-gradient(160deg, rgb(24 29 38 / .97), rgb(15 18 24 / .97)); border: 1px solid color-mix(in srgb, var(--you) 26%, transparent); border-radius: 18px; box-shadow: 0 10px 30px rgb(0 0 0 / .45), 0 0 24px color-mix(in srgb, var(--assistant) 12%, transparent), inset 0 1px rgb(255 255 255 / .05); user-select: none; }
+.planner__header { display: flex; align-items: center; gap: 12px; padding: 14px 12px 10px 18px; }
+.planner__header > div { flex: 1 1 auto; min-width: 0; }
+.planner__header h1 { margin: 0; font-size: 17px; font-weight: 650; letter-spacing: -.01em; }
+.planner__header p { margin: 1px 0 0; color: var(--faint); font-size: 12px; }
+.planner__days { display: flex; align-items: center; gap: 2px; padding: 2px; background: rgb(255 255 255 / .04); border-radius: 10px; }
+.planner__days button, .planner__close { display: grid; place-items: center; height: 28px; min-width: 28px; padding: 0 8px; color: var(--ink); font: inherit; font-size: 12.5px; background: transparent; border: 0; border-radius: 8px; cursor: pointer; transition: background-color 120ms, transform 120ms cubic-bezier(.2, 0, 0, 1); }
+.planner__days button:hover, .planner__close:hover { background: rgb(255 255 255 / .08); }
+.planner__days button:active, .planner__close:active { transform: scale(.94); }
+.planner__day { min-width: 150px; font-weight: 600; }
+.planner__body { display: grid; flex: 1 1 auto; grid-template-columns: 1.25fr 1fr; gap: 12px; min-height: 0; padding: 4px 12px 10px 18px; }
+.planner__body section { min-height: 0; overflow-y: auto; }
+.planner__body h2 { margin: 10px 0 6px; color: var(--faint); font-size: 10.5px; font-weight: 650; letter-spacing: .08em; text-transform: uppercase; }
+.planner__flow { padding-left: 12px; border-left: 1px solid rgb(255 255 255 / .06); }
+.planner__flow h2 { margin-top: 2px; }
+.planner__empty { margin: 8px 0; color: var(--faint); font-size: 12px; line-height: 1.5; }
+.planner__track { position: relative; display: grid; gap: 6px; margin: 4px 0 0; padding: 0; list-style: none; }
+/* The vertical line the time slots hang off. */
+.planner__track::before { position: absolute; top: 6px; bottom: 6px; left: 62px; width: 2px; content: ""; background: linear-gradient(var(--you), var(--assistant)); border-radius: 1px; opacity: .35; }
+.planner__slot { display: grid; grid-template-columns: 56px 1fr; align-items: center; gap: 14px; }
+.planner__slot time { color: var(--faint); font-size: 11.5px; font-variant-numeric: tabular-nums; text-align: right; }
+.planner__anytime { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.planner-task { display: flex; align-items: center; gap: 9px; min-width: 0; padding: 7px 8px 7px 9px; background: rgb(255 255 255 / .045); border: 1px solid rgb(255 255 255 / .06); border-radius: 999px; transition: opacity 220ms, transform 220ms cubic-bezier(.4, 0, 1, 1), background-color 150ms; }
+.planner-task:hover { background: rgb(255 255 255 / .07); }
+.planner-task__check { display: grid; flex: 0 0 auto; place-items: center; width: 18px; height: 18px; padding: 0; color: #0b1220; background: transparent; border: 1.5px solid color-mix(in srgb, var(--you) 70%, transparent); border-radius: 50%; cursor: pointer; transition: background-color 150ms, border-color 150ms, transform 150ms cubic-bezier(.3, 1.6, .5, 1); }
+.planner-task__check:active { transform: scale(.85); }
+.planner-task--done .planner-task__check { background: var(--you); border-color: var(--you); }
+.planner-task__title { flex: 1 1 auto; min-width: 0; overflow: hidden; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; transition: color 150ms; }
+.planner-task--done .planner-task__title { color: var(--faint); text-decoration: line-through; text-decoration-color: color-mix(in srgb, var(--faint) 60%, transparent); }
+.planner-task__actions { display: flex; gap: 2px; opacity: 0; transition: opacity 120ms; }
+.planner-task:hover .planner-task__actions, .planner-task:focus-within .planner-task__actions { opacity: 1; }
+.planner-task__actions button { display: grid; place-items: center; width: 22px; height: 22px; padding: 0; color: var(--ink); background: transparent; border: 0; border-radius: 50%; cursor: pointer; }
+.planner-task__actions button:hover { background: rgb(255 255 255 / .1); }
+.planner-task--leaving { opacity: 0; transform: translateX(14px); }
+.planner__chain { display: grid; justify-items: start; gap: 18px; margin: 0 0 16px; padding: 0; list-style: none; }
+.planner__node { position: relative; display: inline-flex; align-items: center; gap: 6px; max-width: 100%; padding: 6px 12px; font-size: 12.5px; background: color-mix(in srgb, var(--assistant) 14%, transparent); border: 1px solid color-mix(in srgb, var(--assistant) 40%, transparent); border-radius: 10px; }
+/* Arrow down to the next step. */
+.planner__node:not(:last-child)::after { position: absolute; top: calc(100% + 3px); left: 18px; width: 2px; height: 12px; content: ""; background: color-mix(in srgb, var(--assistant) 55%, transparent); }
+.planner__node:not(:last-child)::before { position: absolute; top: calc(100% + 11px); left: 15px; width: 6px; height: 6px; content: ""; border-right: 2px solid color-mix(in srgb, var(--assistant) 55%, transparent); border-bottom: 2px solid color-mix(in srgb, var(--assistant) 55%, transparent); transform: rotate(45deg); }
+.planner__node--done { color: var(--faint); background: rgb(255 255 255 / .04); border-color: rgb(255 255 255 / .1); }
+.planner__add { display: flex; gap: 8px; padding: 10px 12px 12px 18px; border-top: 1px solid rgb(255 255 255 / .06); }
+.planner__add input { height: 34px; padding: 0 12px; color: var(--ink); font: inherit; font-size: 13px; background: rgb(255 255 255 / .05); border: 1px solid rgb(255 255 255 / .08); border-radius: 10px; outline: none; transition: border-color 150ms; color-scheme: dark; }
+.planner__add input:focus { border-color: color-mix(in srgb, var(--you) 60%, transparent); }
+.planner__add input:first-child { flex: 1 1 auto; min-width: 0; }
+.planner__add input[type="time"] { width: 112px; }
+.planner__add button { display: grid; flex: 0 0 auto; place-items: center; width: 34px; height: 34px; color: #0b1220; background: var(--you); border: 0; border-radius: 10px; cursor: pointer; transition: opacity 120ms, transform 120ms cubic-bezier(.2, 0, 0, 1); }
+.planner__add button:disabled { opacity: .35; cursor: default; }
+.planner__add button:active:not(:disabled) { transform: scale(.94); }
+.planner__error { margin: -4px 18px 10px; color: var(--danger); font-size: 12px; }
+@media (prefers-reduced-motion: no-preference) {
+  .planner { animation: planner-in 320ms cubic-bezier(.2, .9, .3, 1.1) both; }
+  .planner__body .planner-task, .planner__body .planner__slot time { animation: vf-rise 260ms cubic-bezier(.2, 0, 0, 1) backwards; }
+  .planner__node { animation: vf-rise 260ms cubic-bezier(.2, 0, 0, 1) backwards; }
+  .planner-task--done .planner-task__check svg { animation: vf-pop 300ms cubic-bezier(.2, .9, .3, 1.4) both; }
+}
+@keyframes planner-in { from { opacity: 0; transform: translateY(16px) scale(.98); } to { opacity: 1; transform: none; } }

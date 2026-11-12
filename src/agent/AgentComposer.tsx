@@ -1,5 +1,6 @@
 import { ArrowUp, ImagePlus, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import { captionTail } from "../overlay/OverlayState";
 import { native } from "../lib/native";
 
 const MAX_IMAGES = 4;
@@ -27,7 +28,7 @@ async function shrink(file: Blob): Promise<string> {
  * Type or paste to Flow during a voice conversation: text, and images it
  * gets described. Takes the caption pill's place while open.
  */
-export function AgentComposer({ onClose }: { onClose: () => void }) {
+export function AgentComposer({ onClose, caption, speaker }: { onClose: () => void; caption: string; speaker: "agent" | "user" | "idle" }) {
   const [draft, setDraft] = useState("");
   const [images, setImages] = useState<string[]>([]);
   const [sending, setSending] = useState(false);
@@ -37,12 +38,12 @@ export function AgentComposer({ onClose }: { onClose: () => void }) {
 
   useEffect(() => field.current?.focus(), []);
 
-  // Grow with the text, up to four lines, then scroll.
+  // Grow with the text, up to three lines, then scroll.
   useEffect(() => {
     const element = field.current;
     if (!element) return;
     element.style.height = "auto";
-    element.style.height = `${Math.min(element.scrollHeight, 76)}px`;
+    element.style.height = `${Math.min(element.scrollHeight, 58)}px`;
   }, [draft]);
 
   const addImages = async (files: Blob[]) => {
@@ -82,6 +83,16 @@ export function AgentComposer({ onClose }: { onClose: () => void }) {
         if (event.key === "Escape") onClose();
       }}
     >
+      {/* What's being said stays visible while you type. */}
+      <div className="agent-composer__caption" role="status" aria-live="polite">
+        <span className={`agent-caption__dot agent-caption__dot--${speaker}`} aria-hidden="true" />
+        <span className="agent-caption__line">
+          <bdi>{captionTail(caption, 120)}</bdi>
+        </span>
+        <button type="button" className="agent-composer__close" aria-label="Close the message box" title="Close · Esc" onClick={onClose}>
+          <X size={13} />
+        </button>
+      </div>
       {(images.length > 0 || error) && (
         <div className="agent-composer__extras">
           {images.map((image, index) => (
